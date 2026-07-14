@@ -1,53 +1,57 @@
 # 🚑 AERIS - Ambulance Emergency Response Intelligent System
 
-**Full-Stack Real-Time Emergency Response System with Live GPS Tracking**
+[![AERIS Version](https://img.shields.io/badge/AERIS-v2.1-blue.svg?style=for-the-badge&logo=opsgenie)](https://github.com/Nareshm03/AERIS)
+[![Status](https://img.shields.io/badge/Status-Production%20Ready-success.svg?style=for-the-badge&logo=githubactions)](https://github.com/Nareshm03/AERIS)
+[![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](https://github.com/Nareshm03/AERIS)
+[![Node Version](https://img.shields.io/badge/Node.js-18%2B-darkgreen.svg?style=for-the-badge&logo=node.js)](https://nodejs.org)
+[![React Version](https://img.shields.io/badge/React-19-blue.svg?style=for-the-badge&logo=react)](https://react.dev)
 
-![AERIS Banner](https://img.shields.io/badge/AERIS-v2.1-blue?style=for-the-badge)
-![Status](https://img.shields.io/badge/Status-Production%20Ready-success?style=for-the-badge)
-![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
-
----
-
-## 🌟 Overview
-
-AERIS is a cutting-edge **Ambulance Emergency Response Intelligent System** that provides real-time ambulance tracking, intelligent traffic signal control, and multi-role dashboards for emergency response coordination. Built as a software prototype with hardware-ready architecture for future ESP32 integration.
-
-### 🎯 Key Features
-
-- ✅ **Real-Time GPS Tracking** - Live ambulance movement on interactive OpenStreetMap
-- ✅ **Intelligent Routing** - Dijkstra algorithm for optimal path calculation
-- ✅ **Green Corridor System** - Automatic traffic signal control along ambulance route
-- ✅ **Dual Verification** - Camera (YOLO simulation) + Siren detection with fail-safe logic
-- ✅ **Multi-Role Dashboards** - Driver, Police, Hospital, and Admin interfaces
-- ✅ **Real-Time Updates** - 2-second polling with live UI synchronization
-- ✅ **Dark Theme UI** - Modern, professional interface with smooth animations
-- ✅ **Sound Notifications** - Audio alerts for emergency events
-- ✅ **Hardware Ready** - Modular architecture for ESP32 traffic signal integration
+AERIS is a cutting-edge, full-stack **Ambulance Emergency Response Intelligent System** designed to minimize emergency response times. It provides real-time GPS tracking, automated "Green Corridor" traffic signal preemption using Dijkstra-based route optimization, dual-verification (YOLO camera + siren frequency detection) simulations, and dedicated dashboards for drivers, traffic police, hospitals, and system administrators.
 
 ---
 
-## 🏗️ Architecture
+## 🌟 Key Features
+
+*   📍 **Real-Time GPS Tracking** – Live ambulance movement tracked on an interactive Leaflet/OpenStreetMap interface.
+*   🛣️ **Intelligent Routing** – Dynamic calculation of the optimal path using a Dijkstra-based route engine.
+*   🚦 **Green Corridor System** – Automatic traffic signal synchronization to clear the path ahead of the approaching ambulance.
+*   🔍 **Dual Verification Engine** – Simulates verification via camera vision (YOLO simulation) & siren sound (FFT frequency validation) to prevent false overrides.
+*   🎛️ **Role-Based Dashboards** – Custom interfaces tailored for **Drivers**, **Police Controllers**, **Receiving Hospitals**, and **System Administrators**.
+*   🔊 **Audio Alerts & Waves** – Real-time siren waveform visualization and sound notifications for critical events.
+*   🔌 **Hardware-Ready** – Modular architecture with built-in API integration templates for physical ESP32 traffic controllers.
+
+---
+
+## 🏗️ Project Architecture
 
 ```
 AERIS/
-├── backend/          # Node.js + Express + TypeScript
-│   ├── server.ts     # Main server with REST APIs
-│   └── Dijkstra      # Route calculation engine
+├── backend/                  # Express + TypeScript Server
+│   ├── server.ts             # Main API & routing configurations
+│   ├── simple-server.ts      # Minimal fallback server implementation
+│   ├── esp32-sim.ts          # Simulation script for ESP32 hardware interactions
+│   └── tsconfig.json         # TypeScript compiler options
 │
-├── frontend/         # React + TypeScript + Vite
-│   ├── pages/        # Role-based dashboards
-│   │   ├── Login.tsx
-│   │   ├── Driver.tsx
-│   │   ├── Police.tsx
-│   │   ├── Hospital.tsx
-│   │   └── Admin.tsx
-│   ├── components/
-│   │   ├── AmbulanceMap.tsx    # Leaflet.js map
-│   │   ├── Nav.tsx
-│   │   ├── Toast.tsx
-│   │   └── TrafficLight.tsx
-│   └── utils/
-│       └── sound.ts   # Audio notification system
+├── frontend/                 # React + TypeScript + Vite Client
+│   ├── src/
+│   │   ├── pages/            # Role-Based Views
+│   │   │   ├── Login.tsx     # Session authentication page
+│   │   │   ├── Driver.tsx    # Route selection & emergency status
+│   │   │   ├── Police.tsx    # Signal override & city grid stats
+│   │   │   ├── Hospital.tsx  # Inbound ETAs & emergency checklists
+│   │   │   └── Admin.tsx     # Session management & active log outputs
+│   │   ├── components/       # Shared UI Widgets
+│   │   │   ├── InteractiveMap.tsx  # Interactive Leaflet Map component
+│   │   │   ├── SirenWaveform.tsx   # Visual FFT waveform simulator
+│   │   │   ├── TrafficLight.tsx    # Live junction status controller
+│   │   │   └── SSEStatus.tsx       # Live server synchronization status
+│   │   └── utils/
+│   │       └── sound.ts      # Sound synthesizer and alerts utility
+│   └── index.html            # Application entrypoint HTML
+│
+├── start-aeris.bat           # Quick launcher script (Windows)
+├── diagnose.bat              # Diagnostic script (Windows)
+└── README.md                 # Project documentation
 ```
 
 ---
@@ -55,298 +59,159 @@ AERIS/
 ## 🚀 Quick Start
 
 ### Prerequisites
-
-- Node.js 18+ and npm
-- Modern browser (Chrome/Edge/Firefox)
+*   [Node.js](https://nodejs.org/) (v18 or higher)
+*   [npm](https://www.npmjs.com/) (packaged with Node.js)
 
 ### Installation
 
-```bash
-# Clone repository
-git clone <your-repo-url>
-cd Project
+1.  **Clone the Repository:**
+    ```bash
+    git clone https://github.com/Nareshm03/AERIS.git
+    cd AERIS
+    ```
 
-# Install backend dependencies
-cd backend
-npm install
-
-# Install frontend dependencies
-cd ../frontend
-npm install
-```
-
-### Running the Application
-
-**Terminal 1 - Backend:**
-```bash
-cd backend
-npm run dev
-# Server runs on http://localhost:4000
-```
-
-**Terminal 2 - Frontend:**
-```bash
-cd frontend
-npm run dev
-# App runs on http://localhost:5173
-```
-
-### Login Credentials
-
-| Role | Username | Password |
-|------|----------|----------|
-| 🚑 Driver | `driver` | `driver123` |
-| 👮 Police | `police` | `police123` |
-| 🏥 Hospital | `hospital` | `hospital123` |
-| 👨‍💼 Admin | `admin` | `admin123` |
+2.  **Install Dependencies:**
+    *   **Backend:**
+        ```bash
+        cd backend
+        npm install
+        ```
+    *   **Frontend:**
+        ```bash
+        cd ../frontend
+        npm install
+        ```
 
 ---
 
-## 📱 Features Breakdown
+## 🏃 Running the Application
 
-### 🗺️ Interactive Map (Leaflet.js + OpenStreetMap)
+You can launch both the frontend and backend servers concurrently using the provided quick-start script (on Windows), or manually in separate terminal windows.
 
-- **Real-time ambulance tracking** with animated marker
-- **Hospital marker** with fixed destination
-- **Route polyline** with color-coded emergency status
-- **Traffic signal markers** showing live RED/GREEN states
-- **Ambulance trail** showing path history
-- **Auto-pan** following ambulance during emergency
-- **Dark theme** map tiles for professional look
-- **Map legend** for easy understanding
+### Method 1: Using the Startup Script (Windows)
+Simply run the script in the root directory:
+```bash
+./start-aeris.bat
+```
 
-### 🚦 Traffic Signal Control
+### Method 2: Manual Startup
 
-- **6 Junction Signals** across city network
-- **Automatic GREEN corridor** when ambulance approaches
-- **Manual override** by Police (auto-release after 30s)
-- **Real-time state sync** across all dashboards
-- **ESP32-ready** signal control API
+**Terminal 1 (Backend Server):**
+```bash
+cd backend
+npm run dev
+# Running on http://localhost:4000
+```
 
-### 🔍 Dual Detection System
+**Terminal 2 (Frontend Client):**
+```bash
+cd frontend
+npm run dev
+# Running on http://localhost:5173
+```
 
-**Camera Detection (YOLO Simulation):**
-- Confidence: 82-96% during active emergency
-- Threshold: ≥75% for verification
-- Visual confidence bar in UI
+---
 
-**Siren Detection (Audio FFT Simulation):**
-- Frequency: 850-1050 Hz during active siren
-- Threshold: ≥700 Hz for verification
-- Live waveform visualization
+## 🔑 Login Credentials
 
-**Fail-Safe Logic:**
-- Emergency ON + (Camera OR Siren) = Verified
-- Both fail → Manual override mode active
-- Real-time status updates
+The prototype features a role-based login system. Use these credentials to sign in to the corresponding dashboards:
 
-### 🎛️ Role-Based Dashboards
+| Icon | Role | Username | Password |
+| :---: | :--- | :--- | :--- |
+| 🚑 | **Driver** | `driver` | `driver123` |
+| 👮 | **Police** | `police` | `police123` |
+| 🏥 | **Hospital** | `hospital` | `hospital123` |
+| 👨‍💼 | **Admin** | `admin` | `admin123` |
 
-#### 🚑 Driver Dashboard
-- Emergency activation button
-- Route selection (3 pre-computed routes)
-- Live GPS position on map
-- Detection status (Camera + Siren)
-- Traffic signal corridor status
-- Route progress tracker
+---
 
-#### 👮 Police Dashboard
-- Citywide signal monitoring
-- Manual signal override controls
-- Live ambulance tracking on map
-- Emergency corridor status
-- Signal statistics (Green/Red/Yellow counts)
+## 📱 Detailed Dashboards breakdown
 
-#### 🏥 Hospital Dashboard
-- Inbound emergency alerts
-- Live ETA countdown timer
-- Ambulance position tracking
-- Bay preparation checklist
-- Patient severity selector
-- Arrival notifications
+### 🚑 Driver Dashboard
+*   **Emergency Mode Switch:** Activating this starts tracking and route optimization.
+*   **Route Selector:** Choose from 3 pre-calculated, optimized path alternatives to the destination.
+*   **Junction Waypoints:** Shows real-time checkpoints, distance metrics, and the green corridor status.
 
-#### 👨‍💼 Admin Dashboard
-- Full system overview
-- All active sessions
-- System logs (last 100 entries)
-- ESP32 hardware status
-- Session management
-- System reset controls
+### 👮 Police Dashboard
+*   **City Junction Grid:** Detailed overview of the 6 city traffic signal systems.
+*   **Manual Override Control:** Temporarily force any signal to Green (automatically releases back to standard mode after 30 seconds).
+*   **System Analytics:** Live charts tracking traffic signal configurations and current priority flags.
+
+### 🏥 Hospital Dashboard
+*   **Active ETA Tracker:** Live countdown calculations updating every 2 seconds based on GPS simulation.
+*   **Emergency Checklist:** Interactive check boxes to manage ER readiness (e.g., "Prepare Bay 1", "Notify Trauma Team").
+*   **Patient Condition Details:** Set severity level to prepare specific emergency protocols.
+
+### 👨‍💼 Admin Dashboard
+*   **Live Session Logger:** Outputs the last 100 system events (e.g., logins, route changes, emergency signals).
+*   **Session Management:** Control active sessions and execute global system resets.
+*   **Hardware Interface Logs:** Monitor the integration logs for connected physical microcontroller modules.
 
 ---
 
 ## 🛠️ Technology Stack
 
-### Backend
-- **Node.js** - Runtime environment
-- **Express.js** - REST API framework
-- **TypeScript** - Type-safe development
-- **JWT** - Authentication
-- **bcrypt** - Password hashing
-- **Dijkstra Algorithm** - Route optimization
+### Backend API
+*   **Runtime:** Node.js
+*   **Framework:** Express.js (TypeScript configured)
+*   **Engine:** Custom Dijkstra graph calculation module
+*   **Auth:** JWT-based user session validation
 
-### Frontend
-- **React 19** - UI framework
-- **TypeScript** - Type safety
-- **Vite** - Build tool
-- **Leaflet.js** - Interactive maps
-- **OpenStreetMap** - Map tiles
-- **Axios** - HTTP client
-- **React Router** - Navigation
-- **Lucide React** - Icons
-
-### Map & GPS
-- **Leaflet.js** - Map rendering
-- **OpenStreetMap** - Free map tiles
-- **Dark theme tiles** - CartoDB Dark Matter
-- **GPS coordinates** - Simulated Delhi locations
-- **Smooth interpolation** - Between waypoints
+### Frontend Client
+*   **Framework:** React 19 (Vite bundler)
+*   **Map API:** Leaflet.js & OpenStreetMap
+*   **Visual Assets:** Lucide React icons, HSL-based dynamic dark CSS themes
+*   **Data Fetching:** Axios client with smart polling mechanisms
 
 ---
 
-## 🎨 UI/UX Features
+## 🔌 Hardware ESP32 Integration Schema
 
-- **Dark Theme** - Professional emergency control center aesthetic
-- **Smooth Animations** - Fade-in, slide-in, pulse effects
-- **Responsive Design** - Works on desktop and tablets
-- **Real-time Updates** - 2-second polling interval
-- **Toast Notifications** - Success/Error/Warning alerts
-- **Sound Effects** - Emergency siren, success beeps
-- **Loading States** - Spinners and skeleton screens
-- **Color-Coded Status** - Red (emergency), Green (safe), Yellow (warning)
+The backend of AERIS contains hooks designed to forward traffic light preemption commands to microcontrollers (like ESP32) running local traffic signals via HTTP endpoints:
 
----
-
-## 🔧 API Endpoints
-
-### Authentication
-- `POST /api/auth/login` - User login
-- `POST /api/auth/logout` - User logout
-- `GET /api/auth/me` - Get current user
-
-### Emergency Management
-- `POST /api/emergency/start` - Start emergency session
-- `POST /api/emergency/stop` - Stop emergency session
-- `GET /api/routes` - Get available routes
-
-### Traffic Control
-- `POST /api/signal/override` - Manual signal override (Police only)
-- `GET /api/status` - Get full system state
-
-### Detection
-- `POST /api/detect/camera` - Camera detection endpoint
-- `POST /api/detect/siren` - Siren detection endpoint
-
-### Admin
-- `DELETE /api/session/:rid` - Delete session (Admin only)
-- `POST /api/system/reset` - System reset (Admin only)
-- `GET /api/logs` - Get system logs
-- `GET /api/esp32` - Get ESP32 hardware status
-
----
-
-## 🔮 Future Hardware Integration
-
-### ESP32 Traffic Signal Controller
-
-The system is designed for easy ESP32 integration:
-
-```typescript
-// Backend sends HTTP POST to ESP32
-POST http://localhost:4001/signal
+```json
+POST /api/esp32/signal
 {
-  "signal": "Signal A",
-  "color": "GREEN"
+  "junctionId": "Junction_B",
+  "state": "GREEN",
+  "duration": 30
 }
-
-// ESP32 receives and controls GPIO pins
-// GPIO mapping: S1→GPIO5, S2→GPIO10, etc.
 ```
 
-**Hardware Setup:**
-1. ESP32 with WiFi module
-2. Relay modules for signal control
-3. Power supply for traffic lights
-4. Network connectivity to backend
+```cpp
+// ESP32 Handler snippet (C++)
+void setTrafficLight(String state) {
+  if (state == "GREEN") {
+    digitalWrite(RED_PIN, LOW);
+    digitalWrite(GREEN_PIN, HIGH);
+  }
+}
+```
 
 ---
 
-## 📊 System Specifications
+## 🔧 Troubleshooting
 
-- **City Graph:** 8 nodes (junctions)
-- **Traffic Signals:** 6 controllable signals
-- **Route Options:** 3 pre-computed paths
-- **Update Frequency:** 2 seconds
-- **GPS Precision:** 5 decimal places
-- **Session Capacity:** Unlimited concurrent sessions
-- **Log Retention:** Last 100 entries
-
----
-
-## 🎯 Use Cases
-
-1. **Emergency Response Coordination** - Real-time ambulance tracking
-2. **Traffic Management** - Intelligent signal control
-3. **Hospital Preparation** - Advance notification system
-4. **Training & Simulation** - Emergency response training
-5. **Research & Development** - Smart city traffic systems
-6. **College Projects** - Full-stack demonstration
-
----
-
-## 🐛 Troubleshooting
-
-### White Page Issue
+### White Screen on Frontend Launch
+This can occur due to Vite cached modules. Clean your local directory and restart:
 ```bash
-# Clear Vite cache
 cd frontend
 rmdir /s /q node_modules\.vite
 npm run dev
 ```
 
-### Backend Connection Failed
-- Ensure backend is running on port 4000
-- Check firewall settings
-- Verify `http://localhost:4000/api/status` is accessible
-
-### Map Not Loading
-- Check internet connection (OpenStreetMap requires internet)
-- Verify Leaflet CSS is loaded in index.html
-- Clear browser cache
+### Backend Port Conflicts
+If port `4000` is already in use by another application:
+1.  Open [backend/server.ts](backend/server.ts).
+2.  Modify the `PORT` variable to another available port (e.g., `4050`).
+3.  Update the api client configuration in [frontend/src/api.ts](frontend/src/api.ts).
 
 ---
 
 ## 📝 License
 
-MIT License - Free for educational and commercial use
+Distributed under the MIT License. See [LICENSE](LICENSE) for more information.
 
 ---
 
-## 👥 Contributors
-
-Built with ❤️ for emergency response systems
-
----
-
-## 🙏 Acknowledgments
-
-- OpenStreetMap contributors
-- Leaflet.js team
-- React community
-- Emergency response professionals
-
----
-
-## 📞 Support
-
-For issues and questions:
-- Check TROUBLESHOOTING.md
-- Review API documentation
-- Test with provided credentials
-
----
-
-**AERIS v2.1** - Making Emergency Response Smarter 🚑💨
-#   A E R I S  
- #   A E R I S  
- 
+*AERIS v2.1 — Making Emergency Response Smarter 🚑💨*
