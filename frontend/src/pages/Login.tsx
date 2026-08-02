@@ -10,7 +10,7 @@ const ROLES = [
   { key: 'driver',   label: 'Ambulance Driver',  icon: <Ambulance size={22} />,   color: '#3b82f6', hint: 'driver123',   desc: 'Activate emergency mode & manage routes' },
   { key: 'police',   label: 'Traffic Police',     icon: <ShieldAlert size={22} />, color: '#f59e0b', hint: 'police123',   desc: 'Monitor signals & manual override control' },
   { key: 'hospital', label: 'Hospital Staff',     icon: <Activity size={22} />,    color: '#10b981', hint: 'hospital123', desc: 'Track inbound ambulances & prep bays' },
-  { key: 'admin',    label: 'System Admin',       icon: <ShieldCheck size={22} />, color: '#8b5cf6', hint: 'admin123',    desc: 'Full system oversight & ESP32 control' },
+  { key: 'admin',    label: 'System Admin',       icon: <ShieldCheck size={22} />, color: '#8b5cf6', hint: 'admin123',    desc: 'Full system oversight & signal control engine' },
 ];
 
 const Login: React.FC = () => {
@@ -263,7 +263,7 @@ const Login: React.FC = () => {
               Real-time SSE
             </div>
 
-            {/* ESP32 Badge */}
+            {/* Signal Engine Badge */}
             <div style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -289,7 +289,7 @@ const Login: React.FC = () => {
               e.currentTarget.style.boxShadow = '0 4px 12px rgba(139,92,246,0.18), 0 2px 4px rgba(0,0,0,0.05)';
             }}>
               <Cpu size={14} strokeWidth={2.5} style={{ color: '#8B5CF6' }} />
-              ESP32 Interface
+              Signal Control Engine
             </div>
           </div>
         </div>
@@ -450,7 +450,7 @@ const Login: React.FC = () => {
                   ['Auth', 'JWT + bcrypt'],
                   ['Routing', 'Dijkstra'],
                   ['Real-time', 'SSE'],
-                  ['Hardware', 'ESP32'],
+                  ['Architecture', 'Software-only'],
                   ['Detection', 'YOLO + FFT'],
                   ['Sessions', 'Multi-amb'],
                   ['Fail-safe', 'Cam ↔ Siren'],

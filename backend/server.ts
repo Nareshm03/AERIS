@@ -13,7 +13,11 @@ import { URL } from 'url';
 const JWT_SECRET = process.env.JWT_SECRET || (() => {
   throw new Error('JWT_SECRET not set - create backend/.env (see .env.example)');
 })();
-const ESP32_HOST = process.env.ESP32_HOST || 'http://localhost:4001'; // ESP32 simulator
+// Traffic signal control engine - a pure-software simulation of signal
+// hardware (see backend/signal-controller-sim.ts). This project has no
+// physical hardware component; if real signal controllers are ever added,
+// they'd talk to this same HTTP interface.
+const SIGNAL_ENGINE_URL = process.env.SIGNAL_ENGINE_URL || 'http://localhost:4001';
 const PORT = Number(process.env.PORT) || 4000;
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
 // Detection microservice (FastAPI + your trained YOLO26 best.onnx) - see /detection-service
@@ -201,8 +205,8 @@ const signals: SignalWithCoords[] = [
   { id: 'S6', name: 'Signal F', junction: 'North Gate',       color: 'RED', timer: 40, manualOverride: false, lat: 28.6300, lng: 77.2100 },
 ];
 
-// ESP32 command log
-const esp32Log: { signal: string; color: string; ts: string; ack: boolean }[] = [];
+// Signal command log (sent to the signal control engine)
+const signalCommandLog: { signal: string; color: string; ts: string; ack: boolean }[] = [];
 
 // System metrics
 let systemLoad = 12;
@@ -219,21 +223,21 @@ function addLog(message: string, type: LogType = 'info', rid?: string) {
   broadcastSSE({ type: 'log', data: entry });
 }
 
-// Send signal command to ESP32 via HTTP
-function sendToESP32(signalName: string, color: string) {
+// Send signal command to the signal control engine via HTTP
+function sendSignalCommand(signalName: string, color: string) {
   const entry = { signal: signalName, color, ts: new Date().toISOString(), ack: false };
-  esp32Log.unshift(entry);
-  if (esp32Log.length > 50) esp32Log.pop();
+  signalCommandLog.unshift(entry);
+  if (signalCommandLog.length > 50) signalCommandLog.pop();
 
-  // Attempt real HTTP call to ESP32 simulator
+  // Attempt real HTTP call to the signal control engine
   const postData = JSON.stringify({ signal: signalName, color });
-  const req = http.request(`${ESP32_HOST}/signal`, {
+  const req = http.request(`${SIGNAL_ENGINE_URL}/signal`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) },
   }, res => {
     entry.ack = res.statusCode === 200;
   });
-  req.on('error', () => { /* ESP32 offline — log only */ });
+  req.on('error', () => { /* signal engine offline — log only */ });
   req.write(postData);
   req.end();
 }
@@ -377,7 +381,7 @@ function updateGreenCorridor() {
         sig.color = 'RED';
         sig.timer = 30;
         addLog(`🔴 CORRIDOR CLOSED: ${sig.name} (${sig.junction}) - No active emergencies`, 'info');
-        sendToESP32(sig.name, 'RED');
+        sendSignalCommand(sig.name, 'RED');
       }
     });
     return;
@@ -420,10 +424,10 @@ function updateGreenCorridor() {
           'success',
           proximity.rid
         );
-        sendToESP32(sig.name, 'GREEN');
+        sendSignalCommand(sig.name, 'GREEN');
       } else if (targetColor === 'RED' && prevColor === 'GREEN') {
         addLog(`🔴 CORRIDOR CLOSED: ${sig.name} (${sig.junction}) - Ambulance passed`, 'info');
-        sendToESP32(sig.name, 'RED');
+        sendSignalCommand(sig.name, 'RED');
       }
     }
   });
@@ -498,7 +502,7 @@ setInterval(() => {
       if (!sig.manualOverride && sig.color === 'GREEN') {
         sig.color = 'RED';
         sig.timer = 30;
-        sendToESP32(sig.name, 'RED');
+        sendSignalCommand(sig.name, 'RED');
       }
     });
   }
@@ -536,7 +540,7 @@ function buildStatePayload() {
     systemLoad,
     apiLatency,
     totalCompleted,
-    esp32Log: esp32Log.slice(0, 20),
+    signalCommandLog: signalCommandLog.slice(0, 20),
   };
 }
 
@@ -666,7 +670,7 @@ app.post('/api/emergency/start', verify, (req: any, res) => {
   addLog(`🔍 Initial verification: Camera ✓ Siren ✓`, 'success', rid);
   addLog(`🏥 Patient: ${session.patient.severity.toUpperCase()} — ${session.patient.condition} (needs ${session.patient.requiredDepartment})`, 'info', rid);
 
-  // Immediately send corridor to ESP32
+  // Immediately send corridor state to the signal control engine
   updateGreenCorridor();
 
   res.status(201).json({ rid, route: route.nodes, routeName: route.name, patient: session.patient });
@@ -682,7 +686,7 @@ app.post('/api/emergency/stop', verify, (req: any, res) => {
 
   // Release corridor
   signals.forEach(sig => {
-    if (!sig.manualOverride) { sig.color = 'RED'; sig.timer = 30; sendToESP32(sig.name, 'RED'); }
+    if (!sig.manualOverride) { sig.color = 'RED'; sig.timer = 30; sendSignalCommand(sig.name, 'RED'); }
   });
   updateGreenCorridor();
 
@@ -735,7 +739,7 @@ app.post('/api/signal/override', verify, (req: any, res) => {
   sig.manualOverride = true;
   sig.timer = color === 'GREEN' ? 60 : color === 'YELLOW' ? 10 : 45;
   addLog(`⚠️ Manual Override: ${sig.name} → ${color} by ${req.user.name}`, 'warning');
-  sendToESP32(sig.name, color);
+  sendSignalCommand(sig.name, color);
   setTimeout(() => { sig.manualOverride = false; }, 30000);
 
   res.json({ success: true, signal: sig });
@@ -999,14 +1003,43 @@ app.get('/api/routes/computed', (_req, res) => {
   res.json({ start, dest, path, weight: path.length - 1 });
 });
 
-app.get('/api/esp32', verify, (_req, res) => {
+app.get('/api/signal-engine', verify, async (_req, res) => {
+  // Reports this backend's own view of signal state (always available),
+  // plus live stats from the signal control engine process if it's
+  // currently reachable. No hardware fields anywhere - this is a report on
+  // two cooperating software services, not a device status page.
+  const localSignalView = signals.map(s => ({
+    name: s.name,
+    state: s.color,
+    commandsReceived: signalCommandLog.filter(c => c.signal === s.name).length,
+  }));
+
+  try {
+    const engineRes = await fetch(`${SIGNAL_ENGINE_URL}/status`);
+    if (engineRes.ok) {
+      const engineStatus: any = await engineRes.json();
+      res.json({
+        connected: true,
+        engineId: engineStatus.engineId || 'AERIS-SIGNAL-ENGINE-001',
+        version: engineStatus.version || 'v1.4.2',
+        uptime: engineStatus.uptime,
+        totalCommands: engineStatus.totalCommands,
+        signals: engineStatus.signals || localSignalView,
+        commandLog: signalCommandLog.slice(0, 30),
+      });
+      return;
+    }
+  } catch {
+    // Signal engine process isn't running - fall through to a local-only report
+  }
+
   res.json({
-    connected: true,
-    deviceId: 'ESP32-AERIS-001',
-    ip: '192.168.1.45',
-    firmware: 'v1.4.2',
-    commands: esp32Log,
-    signalStates: signals.map(s => ({ id: s.id, junction: s.junction, pin: `GPIO${parseInt(s.id.slice(1)) * 5}`, state: s.color })),
+    connected: false,
+    engineId: 'AERIS-SIGNAL-ENGINE-001',
+    version: 'v1.4.2',
+    signals: localSignalView,
+    commands: signalCommandLog,
+    commandLog: signalCommandLog.slice(0, 30),
   });
 });
 
@@ -1058,16 +1091,16 @@ app.post('/api/system/reset', verify, (req: any, res) => {
   sessions.clear();
   logs.splice(0, logs.length);
   signals.forEach(s => { s.color = 'RED'; s.timer = 30; s.manualOverride = false; });
-  esp32Log.splice(0, esp32Log.length);
+  signalCommandLog.splice(0, signalCommandLog.length);
   addLog('🔄 System hard reset by administrator', 'system');
-  signals.forEach(s => sendToESP32(s.name, 'RED'));
+  signals.forEach(s => sendSignalCommand(s.name, 'RED'));
   res.json({ success: true });
 });
 
 // ── STARTUP ──────────────────────────────────────────────────
 addLog('🚀 AERIS backend started. JWT Auth active.', 'system');
 addLog(`📡 Dijkstra graph loaded — ${Object.keys(CITY_GRAPH).length} nodes`, 'system');
-addLog(`🔗 ESP32 controller configured at ${ESP32_HOST}`, 'system');
+addLog(`🔗 Signal control engine configured at ${SIGNAL_ENGINE_URL}`, 'system');
 addLog(`📡 SSE real-time stream ready at /api/stream`, 'system');
 addLog(`🔍 Detection system: Camera (YOLO) + Siren (Audio FFT)`, 'system');
 addLog(`✅ Verification logic: Emergency ON AND (Camera OR Siren)`, 'system');
@@ -1083,5 +1116,5 @@ app.listen(PORT, () => {
   console.log(`   Real-time: SSE at /api/stream`);
   console.log(`   Detection: Camera + Siren (Manual toggle available)`);
   console.log(`   Verification: Emergency ON AND (Camera OR Siren)`);
-  console.log(`   ESP32 Target: ${ESP32_HOST}/signal\n`);
+  console.log(`   Signal Engine Target: ${SIGNAL_ENGINE_URL}/signal\n`);
 });

@@ -6,9 +6,9 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon server.ts",
-    "dev:esp32": "nodemon esp32-sim.ts",
+    "dev:signals": "nodemon signal-controller-sim.ts",
     "start": "ts-node server.ts",
-    "start:esp32": "ts-node esp32-sim.ts"
+    "start:signals": "ts-node signal-controller-sim.ts"
   },
   "keywords": [],
   "author": "",

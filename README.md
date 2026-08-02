@@ -10,19 +10,19 @@
 
 ## 🌟 Overview
 
-AERIS is a cutting-edge **Ambulance Emergency Response Intelligent System** that provides real-time ambulance tracking, intelligent traffic signal control, and multi-role dashboards for emergency response coordination. Built as a software prototype with hardware-ready architecture for future ESP32 integration.
+AERIS is a cutting-edge **Ambulance Emergency Response Intelligent System** that provides real-time ambulance tracking, intelligent traffic signal control, and multi-role dashboards for emergency response coordination. **This is a complete, self-contained software system** — every component, including traffic signal control and detection, runs entirely in software. There is no physical hardware anywhere in this project.
 
 ### 🎯 Key Features
 
 - ✅ **Real-Time GPS Tracking** - Live ambulance movement on interactive OpenStreetMap
-- ✅ **Intelligent Routing** - Dijkstra algorithm for optimal path calculation
-- ✅ **Green Corridor System** - Automatic traffic signal control along ambulance route
-- ✅ **Dual Verification** - Camera (YOLO simulation) + Siren detection with fail-safe logic
+- ✅ **Intelligent Routing** - Dijkstra algorithm for optimal path calculation, with live rerouting around reported roadblocks
+- ✅ **Green Corridor System** - Automatic traffic signal control along ambulance route (software signal engine, see below)
+- ✅ **Dual Verification** - Real YOLO26 object detection + real FFT-based audio siren analysis, with a fail-safe simulated fallback
 - ✅ **Multi-Role Dashboards** - Driver, Police, Hospital, and Admin interfaces
-- ✅ **Real-Time Updates** - 2-second polling with live UI synchronization
+- ✅ **Real-Time Updates** - Server-Sent Events (SSE) push updates live to every connected dashboard
 - ✅ **Dark Theme UI** - Modern, professional interface with smooth animations
 - ✅ **Sound Notifications** - Audio alerts for emergency events
-- ✅ **Hardware Ready** - Modular architecture for ESP32 traffic signal integration
+- ✅ **100% Software** - No hardware dependency anywhere; the "signal control engine" is a software service that models exactly what a real controller would do
 
 ---
 
@@ -121,19 +121,20 @@ npm run dev
 - **Automatic GREEN corridor** when ambulance approaches
 - **Manual override** by Police (auto-release after 30s)
 - **Real-time state sync** across all dashboards
-- **ESP32-ready** signal control API
+- **Software signal control engine** - models exactly what a real controller would do, no hardware required
 
 ### 🔍 Dual Detection System
 
-**Camera Detection (YOLO Simulation):**
-- Confidence: 82-96% during active emergency
+**Camera Detection (Real YOLO26 model):**
+- Your trained model (`best.onnx`) runs real inference on uploaded/captured frames
+- Detects Ambulance, Misc Vehicle, and Siren (visual light bar) classes
+- Falls back to a simulated confidence value if no real frame is sent, so the demo never breaks
 - Threshold: ≥75% for verification
-- Visual confidence bar in UI
 
-**Siren Detection (Audio FFT Simulation):**
-- Frequency: 850-1050 Hz during active siren
-- Threshold: ≥700 Hz for verification
-- Live waveform visualization
+**Siren Detection (Real FFT audio analysis):**
+- Genuine signal processing: sliding-window FFT, tracks dominant frequency in the siren band (500-1800 Hz), scores both in-band energy concentration and sweep periodicity
+- Falls back to a simulated frequency value if no real audio clip is sent
+- Threshold: ≥700 Hz (simulated) or a combined confidence score (real analysis)
 
 **Fail-Safe Logic:**
 - Emergency ON + (Camera OR Siren) = Verified
@@ -169,7 +170,7 @@ npm run dev
 - Full system overview
 - All active sessions
 - System logs (last 100 entries)
-- ESP32 hardware status
+- Signal control engine status
 - Session management
 - System reset controls
 
@@ -209,7 +210,7 @@ npm run dev
 - **Dark Theme** - Professional emergency control center aesthetic
 - **Smooth Animations** - Fade-in, slide-in, pulse effects
 - **Responsive Design** - Works on desktop and tablets
-- **Real-time Updates** - 2-second polling interval
+- **Real-time Updates** - Server-Sent Events (SSE), no polling
 - **Toast Notifications** - Success/Error/Warning alerts
 - **Sound Effects** - Emergency siren, success beeps
 - **Loading States** - Spinners and skeleton screens
@@ -233,41 +234,36 @@ npm run dev
 - `POST /api/signal/override` - Manual signal override (Police only)
 - `GET /api/status` - Get full system state
 
+### Roadblock Reporting
+- `POST /api/roadblock` - Report a blocked road segment (Police/Admin) - triggers live Dijkstra rerouting
+- `DELETE /api/roadblock` - Reopen a previously reported road
+- `GET /api/roadblock` - List currently blocked segments
+
 ### Detection
-- `POST /api/detect/camera` - Camera detection endpoint
-- `POST /api/detect/siren` - Siren detection endpoint
+- `POST /api/detect/camera` - Camera detection (real YOLO26 model if a frame is sent, simulated otherwise)
+- `POST /api/detect/siren` - Siren detection (real FFT audio analysis if a clip is sent, simulated otherwise)
+
+### Patient & Hospital
+- `POST /api/emergency/:rid/acknowledge` - Hospital acknowledges an incoming emergency
+- `POST /api/emergency/:rid/prep` - Toggle a bay-preparation task
 
 ### Admin
 - `DELETE /api/session/:rid` - Delete session (Admin only)
 - `POST /api/system/reset` - System reset (Admin only)
 - `GET /api/logs` - Get system logs
-- `GET /api/esp32` - Get ESP32 hardware status
+- `GET /api/signal-engine` - Get signal control engine status
 
 ---
 
-## 🔮 Future Hardware Integration
+## 💻 Software-Only Architecture
 
-### ESP32 Traffic Signal Controller
+**This project has no hardware component.** Every part of AERIS — including traffic signal control — runs as software:
 
-The system is designed for easy ESP32 integration:
+- The "signal control engine" (`backend/signal-controller-sim.ts`) is a standalone Node.js service that receives signal commands over HTTP and tracks state, exactly like a real controller would, without requiring any physical device.
+- Camera detection uses your actual trained YOLO26 model, run on uploaded image frames — no physical camera required.
+- Siren detection uses real FFT audio analysis on uploaded WAV clips — no physical microphone required.
 
-```typescript
-// Backend sends HTTP POST to ESP32
-POST http://localhost:4001/signal
-{
-  "signal": "Signal A",
-  "color": "GREEN"
-}
-
-// ESP32 receives and controls GPIO pins
-// GPIO mapping: S1→GPIO5, S2→GPIO10, etc.
-```
-
-**Hardware Setup:**
-1. ESP32 with WiFi module
-2. Relay modules for signal control
-3. Power supply for traffic lights
-4. Network connectivity to backend
+If real signal hardware were ever added in the future, it would simply POST to the same `/signal` HTTP endpoint this software engine already exposes — but building or demonstrating that hardware is explicitly out of scope for this project.
 
 ---
 

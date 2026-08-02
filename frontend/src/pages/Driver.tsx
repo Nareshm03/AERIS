@@ -779,7 +779,7 @@ const Driver: React.FC = () => {
                 </div>
               </div>
               <div className="card-body">
-                <p className="text-xs text-muted mb-3">Signals flip GREEN as ambulance advances. Commands sent to ESP32 via HTTP.</p>
+                <p className="text-xs text-muted mb-3">Signals flip GREEN as ambulance advances. Commands sent to the signal control engine via HTTP.</p>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(95px, 1fr))', gap: 10 }}>
                 {state?.signals.map(sig => (
                   <div key={sig.id} className="card-stat" style={{ padding: '1rem', gap: '0.5rem' }}>

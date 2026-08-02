@@ -39,7 +39,7 @@ export interface SystemState {
   systemLoad: number;
   apiLatency: number;
   totalCompleted: number;
-  esp32Log: { signal: string; color: string; ts: string; ack: boolean }[];
+  signalCommandLog: { signal: string; color: string; ts: string; ack: boolean }[];
 }
 
 export interface LogEntry {
@@ -52,17 +52,15 @@ export interface AuthUser {
   sub: string; name: string; role: string; username: string;
 }
 
-export interface ESP32Status {
+export interface SignalEngineStatus {
   connected: boolean;
-  deviceId: string;
-  firmware: string;
-  ip: string;
+  engineId: string;
+  version: string;
   uptime?: number;
   commands?: any[];
   totalCommands?: number;
   signals?: { name: string; state: string; lastUpdate?: string; commandsReceived?: number }[];
-  signalStates?: { id: string; junction: string; pin: string; state: string }[];
-  commandLog?: { ts: string; signal: string; color: string; gpioSet?: string }[];
+  commandLog?: { ts: string; signal: string; color: string }[];
 }
 
 export interface DetectionToggleResponse {
@@ -387,13 +385,13 @@ export const detectSiren = async (rid: string, frequency?: number): Promise<{ de
   }
 };
 
-// ESP32 Hardware
-export const fetchESP32 = async (): Promise<ESP32Status> => {
+// Signal control engine (pure software - see backend/signal-controller-sim.ts)
+export const fetchSignalEngine = async (): Promise<SignalEngineStatus> => {
   try {
-    const res = await http.get('/esp32');
+    const res = await http.get('/signal-engine');
     return res.data;
   } catch (error) {
-    console.error('Fetch ESP32 error:', error);
+    console.error('Fetch signal engine error:', error);
     throw new Error(handleApiError(error));
   }
 };

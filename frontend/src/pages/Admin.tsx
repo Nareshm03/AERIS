@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Server, Terminal, RefreshCw, Activity, Cpu, Database, Wifi, Zap, HardDrive, Trash2 } from 'lucide-react';
 import { useSSE } from '../hooks/usePoll';
-import { resetSystem, deleteSession, fetchESP32 } from '../api';
-import type { ESP32Status } from '../api';
+import { resetSystem, deleteSession, fetchSignalEngine } from '../api';
+import type { SignalEngineStatus } from '../api';
 import Nav from '../components/Nav';
 import TrafficLight from '../components/TrafficLight';
 import InteractiveMap from '../components/InteractiveMap';
@@ -51,28 +51,28 @@ const LOG_ICONS: Record<string, string> = {
 const Admin: React.FC = () => {
   const { state, logs, connected, error: sseError, reconnect } = useSSE();
   const { toast }  = useToast();
-  const [esp32, setEsp32]  = useState<ESP32Status | null>(null);
-  const [esp32Loading, setEsp32Loading] = useState(true);
-  const [esp32Error, setEsp32Error] = useState<string | null>(null);
+  const [signalEngine, setSignalEngine]  = useState<SignalEngineStatus | null>(null);
+  const [signalEngineLoading, setSignalEngineLoading] = useState(true);
+  const [signalEngineError, setSignalEngineError] = useState<string | null>(null);
   const [loadHist, setLoadHist] = useState<number[]>(Array(20).fill(10));
   const [latHist,  setLatHist]  = useState<number[]>(Array(20).fill(45));
   const [resetLoading, setResetLoading] = useState(false);
   const [deletingSession, setDeletingSession] = useState<string | null>(null);
 
-  // Poll ESP32 status with error handling
+  // Poll signal engine status with error handling
   useEffect(() => {
     const poll = async () => { 
       try { 
-        setEsp32Loading(true);
-        setEsp32Error(null);
-        const data = await fetchESP32();
-        setEsp32(data);
+        setSignalEngineLoading(true);
+        setSignalEngineError(null);
+        const data = await fetchSignalEngine();
+        setSignalEngine(data);
       } catch (error: any) { 
-        console.error('ESP32 fetch error:', error);
-        setEsp32Error(error.message || 'ESP32 offline');
-        setEsp32(null);
+        console.error('Signal engine fetch error:', error);
+        setSignalEngineError(error.message || 'Signal engine offline');
+        setSignalEngine(null);
       } finally {
-        setEsp32Loading(false);
+        setSignalEngineLoading(false);
       }
     };
     poll();
@@ -155,7 +155,7 @@ const Admin: React.FC = () => {
         <div className="page-header">
           <div>
             <h1 className="page-title">System Administration</h1>
-            <p className="page-subtitle">Global oversight · JWT sessions · ESP32 hardware · Dijkstra routing</p>
+            <p className="page-subtitle">Global oversight · JWT sessions · Signal control engine · Dijkstra routing</p>
           </div>
           <button 
             className="btn btn-danger-outline" 
@@ -287,7 +287,7 @@ const Admin: React.FC = () => {
                     ['Routing', 'Dijkstra Algorithm', 'blue'],
                     ['Real-time', 'Server-Sent Events', 'blue'],
                     ['Detection', 'Camera + Siren APIs', active.length > 0 ? 'green' : 'blue'],
-                    ['ESP32 Link', `${ESP32_HOST_LABEL}`, esp32 ? 'green' : 'yellow'],
+                    ['Signal Engine Link', `${SIGNAL_ENGINE_LABEL}`, signalEngine ? 'green' : 'yellow'],
                     ['SSE Clients', connected ? '1+ connected' : 'None', connected ? 'green' : 'red'],
                   ].map(([k, v, b]) => (
                     <tr key={k}><td className="text-muted">{k}</td><td className="mono text-sm">{v}</td><td><span className={`status-badge badge-${b}`}>{b === 'green' ? '✓' : b === 'red' ? '✗' : '—'}</span></td></tr>
@@ -321,30 +321,29 @@ const Admin: React.FC = () => {
               </div>
             </div>
 
-            {/* ESP32 Panel */}
+            {/* Signal Control Engine Panel */}
             <div className="card animate-fade-up">
               <div className="section-title">
-                <HardDrive size={14} /> ESP32 Hardware Interface
-                {esp32Loading && <div className="spinner" style={{ width: 12, height: 12, marginLeft: 8 }} />}
+                <HardDrive size={14} /> Signal Control Engine
+                {signalEngineLoading && <div className="spinner" style={{ width: 12, height: 12, marginLeft: 8 }} />}
               </div>
-              {esp32Loading && !esp32 ? (
+              {signalEngineLoading && !signalEngine ? (
                 <div className="text-center py-4">
                   <div className="spinner" style={{ width: 24, height: 24, margin: '0 auto 8px' }} />
-                  <div className="text-xs text-muted">Loading ESP32 status...</div>
+                  <div className="text-xs text-muted">Loading signal engine status...</div>
                 </div>
-              ) : esp32Error ? (
+              ) : signalEngineError ? (
                 <div className="text-center py-4">
-                  <div className="text-xs text-red mb-2">⚠️ {esp32Error}</div>
-                  <div className="text-xs text-quiet">ESP32 simulator offline<br />Run: npm run dev:esp32 (port 4001)</div>
+                  <div className="text-xs text-red mb-2">⚠️ {signalEngineError}</div>
+                  <div className="text-xs text-quiet">Signal control engine offline<br />Run: npm run dev:signalEngine (port 4001)</div>
                 </div>
-              ) : esp32 ? (
+              ) : signalEngine ? (
                 <>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 16px', fontSize: '0.77rem', marginBottom: 16 }}>
                     {[
-                      ['Device', esp32.deviceId || 'N/A'], 
-                      ['IP', esp32.ip || 'N/A'], 
-                      ['Firmware', esp32.firmware || 'N/A'], 
-                      ['Commands', String(esp32.totalCommands || esp32.commands?.length || 0)]
+                      ['Engine', signalEngine.engineId || 'N/A'], 
+                      ['Version', signalEngine.version || 'N/A'], 
+                      ['Commands', String(signalEngine.totalCommands || signalEngine.commands?.length || 0)]
                     ].map(([k, v]) => (
                       <div key={k} style={{ padding: '6px 0', borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
                         <div className="text-xs text-quiet mb-1">{k}</div>
@@ -352,13 +351,13 @@ const Admin: React.FC = () => {
                       </div>
                     ))}
                   </div>
-                  {(esp32.signals || esp32.signalStates) && (
+                  {signalEngine.signals && (
                     <>
-                      <div className="section-title mb-3" style={{ fontSize: '0.75rem' }}>GPIO Pin States</div>
+                      <div className="section-title mb-3" style={{ fontSize: '0.75rem' }}>Signal States</div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
-                        {(esp32.signalStates || esp32.signals || []).map((s: any) => (
-                          <div key={s.name || s.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '8px 14px', background: 'rgba(0,0,0,0.04)', borderRadius: 16, border: '1px solid rgba(0,0,0,0.08)', fontSize: '0.7rem' }}>
-                            <div className="text-quiet font-medium">{s.name || s.id}</div>
+                        {(signalEngine.signals || []).map((s: any) => (
+                          <div key={s.name} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '8px 14px', background: 'rgba(0,0,0,0.04)', borderRadius: 16, border: '1px solid rgba(0,0,0,0.08)', fontSize: '0.7rem' }}>
+                            <div className="text-quiet font-medium">{s.name}</div>
                             <div style={{ width: 12, height: 12, borderRadius: '50%', background: s.state === 'GREEN' ? 'var(--c-green)' : s.state === 'YELLOW' ? 'var(--c-yellow)' : 'var(--c-red)', boxShadow: `0 0 10px ${s.state === 'GREEN' ? 'var(--c-green)' : s.state === 'YELLOW' ? 'var(--c-yellow)' : 'var(--c-red)'}` }} />
                             <div className="mono text-quiet font-bold" style={{ fontSize: '0.65rem' }}>{s.state}</div>
                           </div>
@@ -366,29 +365,28 @@ const Admin: React.FC = () => {
                       </div>
                     </>
                   )}
-                  {(esp32.commandLog || esp32.commands) && (
+                  {(signalEngine.commandLog || signalEngine.commands) && (
                     <>
-                      <div className="section-title mb-3" style={{ fontSize: '0.75rem' }}>Recent ESP32 Commands</div>
+                      <div className="section-title mb-3" style={{ fontSize: '0.75rem' }}>Recent Signal Commands</div>
                       <div style={{ maxHeight: 130, overflowY: 'auto' }}>
-                        {(esp32.commandLog || esp32.commands || []).slice(0, 10).map((cmd: any, i: number) => (
+                        {(signalEngine.commandLog || signalEngine.commands || []).slice(0, 10).map((cmd: any, i: number) => (
                           <div key={i} className="log-entry" style={{ fontSize: '0.73rem' }}>
                             <div className="log-time" style={{ fontSize: '0.62rem' }}>{new Date(cmd.ts).toLocaleTimeString('en-IN', { hour12: false })}</div>
                             <div style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: cmd.color === 'GREEN' ? 'var(--c-green)' : cmd.color === 'YELLOW' ? 'var(--c-yellow)' : 'var(--c-red)' }} />
                             <div style={{ color: 'var(--text-secondary)', fontSize: '0.72rem' }}>
                               {cmd.signal} → <span style={{ color: cmd.color === 'GREEN' ? 'var(--c-green)' : cmd.color === 'YELLOW' ? 'var(--c-yellow)' : 'var(--c-red)', fontWeight: 600 }}>{cmd.color}</span>
-                              {cmd.gpioSet && <span className="mono text-quiet" style={{ fontSize: '0.62rem', marginLeft: 8 }}>{cmd.gpioSet.split(',')[0]}</span>}
                             </div>
                           </div>
                         ))}
-                        {(esp32.commandLog || esp32.commands || []).length === 0 && <div className="text-xs text-quiet">No commands sent yet.</div>}
+                        {(signalEngine.commandLog || signalEngine.commands || []).length === 0 && <div className="text-xs text-quiet">No commands sent yet.</div>}
                       </div>
                     </>
                   )}
                 </>
               ) : (
                 <div className="text-center text-sm text-muted py-4">
-                  ESP32 simulator offline<br />
-                  <span className="text-xs text-quiet">Run: npm run dev:esp32 (port 4001)</span>
+                  Signal control engine offline<br />
+                  <span className="text-xs text-quiet">Run: npm run dev:signalEngine (port 4001)</span>
                 </div>
               )}
             </div>
@@ -400,5 +398,5 @@ const Admin: React.FC = () => {
   );
 };
 
-const ESP32_HOST_LABEL = 'localhost:4001';
+const SIGNAL_ENGINE_LABEL = 'localhost:4001';
 export default Admin;

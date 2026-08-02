@@ -5,7 +5,7 @@ Applied directly to a clone of your repo, typechecked, built, and tested live
 
 ## backend/server.ts
 
-1. **Security**: `JWT_SECRET`, `ESP32_HOST`, `PORT`, `FRONTEND_ORIGIN`,
+1. **Security**: `JWT_SECRET`, `SIGNAL_ENGINE_URL`, `PORT`, `FRONTEND_ORIGIN`,
    `DETECTION_SERVICE_URL` all moved to `process.env` via `dotenv`. Throws on
    startup if `JWT_SECRET` isn't set, rather than silently using a weak
    default. See `.env.example`.
@@ -201,3 +201,44 @@ visual signals from one model.
   the 0.55 confidence cutoff) are tuned against synthetic test signals -
   if you have real recorded siren clips, test against those and adjust
   `siren_detector.py`'s constants if needed.
+
+---
+
+## Round 4 (this pass): removed all hardware framing — pure software project
+
+Per instructor guidance, hardware integration is explicitly out of scope.
+Renamed everything that implied a physical ESP32/hardware dependency,
+without changing any actual behavior — this was a pure rename/reframe.
+
+1. **`backend/esp32-sim.ts` → `backend/signal-controller-sim.ts`** - rewritten
+   header/comments to describe it as the software signal control engine, not
+   a stand-in for missing hardware. Removed GPIO-pin-mapping language,
+   firmware-version framing, and device IDs implying a physical chip.
+2. **`backend/server.ts`**: `ESP32_HOST` → `SIGNAL_ENGINE_URL`, `sendToESP32`
+   → `sendSignalCommand`, `esp32Log` → `signalCommandLog`, `/api/esp32` →
+   `/api/signal-engine`, console banner text updated.
+3. **`backend/package.json`**: `dev:esp32`/`start:esp32` scripts renamed to
+   `dev:signals`/`start:signals`.
+4. **`backend/.env.example`**: `ESP32_HOST` → `SIGNAL_ENGINE_URL`.
+5. **Frontend**: `api.ts` (`ESP32Status` → `SignalEngineStatus`, `fetchESP32`
+   → `fetchSignalEngine`, `esp32Log` field renamed), `Admin.tsx` (entire
+   "ESP32 Hardware Interface" panel renamed to "Signal Control Engine",
+   removed "GPIO Pin States" heading and GPIO-specific fields), `Login.tsx`
+   (removed "ESP32 Interface" badge and "Hardware: ESP32" role-card row),
+   `Driver.tsx` (one line of copy).
+6. **`README.md`**: rewrote the overview, feature list, detection section,
+   and API docs to describe the actual current system (real YOLO + real FFT,
+   not "simulation"; SSE, not polling) and removed the entire "Future
+   Hardware Integration" section, replaced with a "Software-Only
+   Architecture" section stating explicitly that no hardware is used or
+   planned.
+
+### Verified
+- Full repo-wide grep for "esp32" (case-insensitive) across every `.ts`,
+  `.tsx`, `.json`, `.md`, and `.env.example` file: zero matches remaining
+  outside of this changelog's own description of the rename.
+- Backend typecheck: clean, 0 errors.
+- Frontend production build: clean, 0 errors.
+- No behavior changed - this was a rename/reframe only. The signal control
+  engine still runs on port 4001, still receives the same HTTP commands,
+  still tracks the same state; only names and documentation changed.
