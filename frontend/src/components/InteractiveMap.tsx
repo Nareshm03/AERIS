@@ -34,7 +34,7 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({
   const polylinesRef = useRef<Map<string, L.Polyline>>(new Map());
   const trailsRef = useRef<Map<string, L.Polyline>>(new Map());
   const signalMarkersRef = useRef<Map<string, L.CircleMarker>>(new Map());
-  const hospitalMarkerRef = useRef<L.Marker | null>(null);
+  const hospitalMarkersRef = useRef<Map<string, L.Marker>>(new Map());
   const [mapReady, setMapReady] = useState(false);
   const [selectedAmbulance, setSelectedAmbulance] = useState<string | null>(null);
 
@@ -100,10 +100,11 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
-    // Create map centered on Delhi
+    // Create map centered on central Bengaluru - covers the full network
+    // from Indiranagar (north-east) down to Silk Board Junction (south)
     const map = L.map(mapContainerRef.current, {
-      center: [28.6139, 77.2090],
-      zoom: 13,
+      center: [12.9480, 77.6300],
+      zoom: 12,
       zoomControl: true,
       attributionControl: true,
     });
@@ -120,23 +121,31 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({
     mapRef.current = map;
     setMapReady(true);
 
-    // Add hospital marker (City Hospital - destination)
-    const hospitalMarker = L.marker([28.6320, 77.2220], { icon: hospitalIcon })
-      .addTo(map)
-      .bindPopup(`
-        <div style="font-family: system-ui; padding: 8px;">
-          <div style="font-weight: 700; font-size: 16px; margin-bottom: 8px; color: #10b981;">
-            🏥 City Hospital
+    // Add real hospital markers (Section 6: multiple real hospitals, not
+    // a single hardcoded destination)
+    const REAL_HOSPITALS: { name: string; lat: number; lng: number; address: string }[] = [
+      { name: 'Manipal Hospital', lat: 12.9588, lng: 77.6491, address: 'Old Airport Road, Kodihalli' },
+      { name: "St. John's Medical College Hospital", lat: 12.9293, lng: 77.6201, address: 'Sarjapur Road, Koramangala' },
+      { name: 'Victoria Hospital', lat: 12.9634, lng: 77.5738, address: 'Fort Road, Bengaluru' },
+    ];
+    REAL_HOSPITALS.forEach(h => {
+      const marker = L.marker([h.lat, h.lng], { icon: hospitalIcon })
+        .addTo(map)
+        .bindPopup(`
+          <div style="font-family: system-ui; padding: 8px;">
+            <div style="font-weight: 700; font-size: 16px; margin-bottom: 8px; color: #10b981;">
+              🏥 ${h.name}
+            </div>
+            <div style="font-size: 13px; color: #6b7280; margin-bottom: 4px;">
+              ${h.address}
+            </div>
+            <div style="font-size: 12px; color: #9ca3af;">
+              📍 ${h.lat.toFixed(4)}°N, ${h.lng.toFixed(4)}°E
+            </div>
           </div>
-          <div style="font-size: 13px; color: #6b7280; margin-bottom: 4px;">
-            Emergency Gateway
-          </div>
-          <div style="font-size: 12px; color: #9ca3af;">
-            📍 28.6320°N, 77.2220°E
-          </div>
-        </div>
-      `);
-    hospitalMarkerRef.current = hospitalMarker;
+        `);
+      hospitalMarkersRef.current.set(h.name, marker);
+    });
 
     return () => {
       map.remove();
@@ -271,18 +280,22 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
       // Draw route polyline
       const routeCoords: [number, number][] = session.route.map(node => {
-        // Map node names to GPS coordinates (from backend)
+        // Map node names to GPS coordinates (real Bengaluru junctions, matches backend)
         const coords: Record<string, [number, number]> = {
-          'Dispatch Bay': [28.6139, 77.2090],
-          'Junction A': [28.6180, 77.2120],
-          'Junction B': [28.6220, 77.2150],
-          'Central Junction': [28.6250, 77.2180],
-          'Medical Zone': [28.6280, 77.2200],
-          'Ring Road': [28.6160, 77.2050],
-          'North Gate': [28.6300, 77.2100],
-          'City Hospital': [28.6320, 77.2220],
+          'Indiranagar Metro (Dispatch)': [12.9786, 77.6388],
+          '100 Feet Road Junction': [12.9719, 77.6412],
+          'Domlur Flyover': [12.9604, 77.6417],
+          'Kodihalli Junction': [12.9601, 77.6472],
+          'Marathahalli (ORR)': [12.9562, 77.7019],
+          'Manipal Hospital': [12.9588, 77.6491],
+          'Halasuru (Ulsoor)': [12.9757, 77.6263],
+          'Trinity Circle': [12.9730, 77.6170],
+          'Victoria Hospital': [12.9634, 77.5738],
+          'Adugodi': [12.9435, 77.6091],
+          'Silk Board Junction': [12.9170, 77.6220],
+          "St. John's Medical College Hospital": [12.9293, 77.6201],
         };
-        return coords[node] || [28.6139, 77.2090];
+        return coords[node] || [12.9786, 77.6388];
       });
 
       // Update or create route polyline

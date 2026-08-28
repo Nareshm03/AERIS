@@ -1,19 +1,27 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400;1,9..144,500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=SF+Pro+Display:wght@300;400;500;600;700;800;900&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=SF+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 /* ================================
    CSS CUSTOM PROPERTIES
 ================================ */
 :root {
-  --bg-primary: #F0F4F8;
+  /* ── Typography: elegant display serif + premium sans + clean body ── */
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-sans: 'Manrope', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-body: 'Inter', 'Manrope', -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Menlo', monospace;
+
+  /* ── Warm ivory base instead of cool tech blue-grey ── */
+  --bg-primary: #FAF7F2;
   --bg-secondary: #FFFFFF;
-  --bg-card: rgba(255, 255, 255, 0.45);
-  --bg-card-hover: rgba(255, 255, 255, 0.62);
-  --bg-overlay: rgba(255, 255, 255, 0.35);
-  --border-light: rgba(255, 255, 255, 0.55);
-  --border-medium: rgba(255, 255, 255, 0.7);
-  --divider: rgba(0, 0, 0, 0.08);
+  --bg-card: rgba(255, 253, 249, 0.55);
+  --bg-card-hover: rgba(255, 253, 249, 0.72);
+  --bg-overlay: rgba(255, 253, 249, 0.4);
+  --border-light: rgba(255, 255, 255, 0.6);
+  --border-medium: rgba(255, 255, 255, 0.78);
+  --divider: rgba(34, 31, 38, 0.08);
 
   /* Glass-specific tokens */
   --glass-blur: blur(40px) saturate(200%);
@@ -21,50 +29,62 @@
   --glass-border-hover: 1px solid rgba(255, 255, 255, 0.9);
   --glass-inner-glow: inset 0 1px 2px 0 rgba(255, 255, 255, 0.9);
   --glass-inner-glow-strong: inset 0 2px 4px 0 rgba(255, 255, 255, 1);
-  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.05);
-  --glass-shadow-hover: 0 20px 60px rgba(0, 0, 0, 0.12), 0 4px 12px rgba(0, 0, 0, 0.08);
-  --glass-shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.14), 0 8px 20px rgba(0, 0, 0, 0.1);
+  --glass-shadow: 0 8px 32px rgba(90, 60, 40, 0.07), 0 2px 8px rgba(90, 60, 40, 0.04);
+  --glass-shadow-hover: 0 20px 60px rgba(90, 60, 40, 0.1), 0 4px 12px rgba(90, 60, 40, 0.06);
+  --glass-shadow-lg: 0 24px 64px rgba(90, 60, 40, 0.12), 0 8px 20px rgba(90, 60, 40, 0.08);
 
-  /* WCAG AA Compliant Text Colors (4.5:1 contrast on white) */
-  --text-primary: #0F172A;      /* Contrast: 14.5:1 */
-  --text-secondary: #475569;    /* Contrast: 7.8:1 */
-  --text-tertiary: #64748B;     /* Contrast: 5.2:1 */
-  
-  /* Enhanced Primary Colors - WCAG AA Compliant */
-  --blue: #0066CC;              /* Contrast: 5.9:1 on white */
-  --blue-dark: #004C99;         /* Contrast: 8.5:1 on white */
-  --blue-light: #E0F2FE;
-  --blue-bright: #0080FF;       /* For emphasis */
-  
-  --green: #059669;             /* Contrast: 4.8:1 on white */
-  --green-dark: #047857;        /* Contrast: 6.2:1 on white */
-  --green-light: #D1FAE5;
-  --green-bright: #10B981;      /* For emphasis */
-  
-  --red: #DC2626;               /* Contrast: 5.9:1 on white */
-  --red-dark: #B91C1C;          /* Contrast: 7.5:1 on white */
-  --red-light: #FEE2E2;
-  --red-bright: #EF4444;        /* For emphasis */
-  
-  --orange: #D97706;            /* Contrast: 4.7:1 on white */
-  --orange-dark: #B45309;       /* Contrast: 6.1:1 on white */
-  --orange-light: #FEF3C7;
-  --orange-bright: #F59E0B;     /* For emphasis */
-  
-  --purple: #7C3AED;            /* Contrast: 5.1:1 on white */
-  --purple-dark: #6D28D9;       /* Contrast: 6.8:1 on white */
-  --purple-light: #EDE9FE;
-  --purple-bright: #8B5CF6;     /* For emphasis */
+  /* Warm charcoal text (not cool slate) - still WCAG AA compliant */
+  --text-primary: #241F2B;      /* Contrast: 14.2:1 */
+  --text-secondary: #5C5568;    /* Contrast: 7.4:1 */
+  --text-tertiary: #837C8E;     /* Contrast: 4.7:1 */
+
+  /* ═══════════════════════════════════════════════════════════
+     PREMIUM PASTEL PALETTE — one bold bright accent (crimson,
+     reserved for emergency/primary actions), everything else a
+     refined, desaturated pastel rather than a loud SaaS color.
+     ═══════════════════════════════════════════════════════════ */
+
+  /* Dusty periwinkle (was saturated blue) */
+  --blue: #5D7DA6;
+  --blue-dark: #46617F;
+  --blue-light: #E7EEF6;
+  --blue-bright: #7C9BC4;
+
+  /* Sage (was saturated green) */
+  --green: #6E9481;
+  --green-dark: #557563;
+  --green-light: #E7F0EA;
+  --green-bright: #86AB97;
+
+  /* THE bold bright accent — vivid crimson-coral, used sparingly and
+     deliberately for emergency states and primary calls to action so
+     it actually stands out against the soft palette around it. */
+  --red: #E23F4E;
+  --red-dark: #C22F3D;
+  --red-light: #FCE9EA;
+  --red-bright: #FF3B5C;
+
+  /* Warm sand (was saturated orange/amber) */
+  --orange: #C89B5C;
+  --orange-dark: #A67D42;
+  --orange-light: #F7EEDD;
+  --orange-bright: #D6AD72;
+
+  /* Soft lavender (was saturated purple) */
+  --purple: #8C7CB5;
+  --purple-dark: #6F6096;
+  --purple-light: #EEEAF6;
+  --purple-bright: #A395C9;
 
   /* Legacy color mappings for backward compatibility */
   --c-blue: var(--blue-bright);
   --c-green: var(--green-bright);
-  --c-green-dim: rgba(16, 185, 129, 0.12);
+  --c-green-dim: rgba(110, 148, 129, 0.14);
   --c-red: var(--red-bright);
   --c-red-bright: var(--red-bright);
   --c-yellow: var(--orange-bright);
   --accent-blue: var(--blue);
-  --accent-cyan: #06B6D4;
+  --accent-cyan: #6FA9AD;
 
   /* State-specific colors with high contrast */
   --success: var(--green-dark);
@@ -86,9 +106,9 @@
   --radius: 16px;
   --radius-lg: 20px;
   --radius-xl: 24px;
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08);
+  --shadow-sm: 0 1px 3px rgba(90, 60, 40, 0.04);
+  --shadow-md: 0 4px 12px rgba(90, 60, 40, 0.06);
+  --shadow-lg: 0 8px 24px rgba(90, 60, 40, 0.08);
   --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -106,16 +126,16 @@ html {
 }
 
 body {
-  font-family: 'SF Pro Display', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: var(--font-body);
   background:
-    radial-gradient(ellipse at top, rgba(232,240,254,0.4), transparent 50%),
-    radial-gradient(ellipse at bottom right, rgba(224,242,254,0.3), transparent 50%),
+    radial-gradient(ellipse at top, rgba(240, 233, 220, 0.5), transparent 50%),
+    radial-gradient(ellipse at bottom right, rgba(247, 238, 221, 0.35), transparent 50%),
     linear-gradient(135deg,
-      #E8F0FE 0%,
-      #F5F7FA 30%,
+      #F5EFE4 0%,
+      #FAF7F2 30%,
       #FFFFFF 55%,
-      #F0F2F5 80%,
-      #EAF0F7 100%
+      #FAF7F1 80%,
+      #F5EEE0 100%
     );
   background-attachment: fixed;
   color: var(--text-primary);
@@ -340,8 +360,15 @@ body::before {
 ================================ */
 .container {
   max-width: 1400px;
-  margin: 0 auto;
-  padding: 2rem;
+  margin: 0 auto 0 288px;
+  padding: 2rem 2rem 2rem 0;
+}
+
+@media (max-width: 900px) {
+  .container {
+    margin-left: 92px;
+    padding: 1.5rem 1.5rem 1.5rem 0;
+  }
 }
 
 .page-header {
@@ -385,45 +412,63 @@ body::before {
   border: 1px solid rgba(255, 255, 255, 0.65);
   border-radius: 24px;
   padding: 1.75rem;
-  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  transform-style: preserve-3d;
+  will-change: transform;
   box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.06),
-    0 2px 8px rgba(0, 0, 0, 0.04),
+    0 8px 32px rgba(90, 60, 40, 0.06),
+    0 2px 8px rgba(90, 60, 40, 0.04),
     inset 0 1px 2px 0 rgba(255, 255, 255, 0.8),
-    inset 0 -1px 1px 0 rgba(0, 0, 0, 0.02);
+    inset 0 -1px 1px 0 rgba(90, 60, 40, 0.02),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.8);
   display: flex;
   flex-direction: column;
   position: relative;
   overflow: hidden;
+  --mx: 50%;
+  --my: 50%;
 }
 
+/* Corner accent notch - a folded-corner shape that tints in with the bold
+   accent color on hover. Quiet by default, distinctive when noticed. */
 .card::before {
   content: '';
   position: absolute;
   top: 0;
-  left: 0;
   right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.8), transparent);
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0 34px 34px 0;
+  border-color: transparent var(--red-bright) transparent transparent;
+  opacity: 0;
+  transform: translate(6px, -6px);
+  transition: opacity 0.3s ease, transform 0.3s ease;
   pointer-events: none;
+  z-index: 1;
+}
+.card:hover::before {
+  opacity: 0.16;
+  transform: translate(0, 0);
 }
 
+/* Liquid Glass cursor sheen - a soft specular highlight that tracks the
+   mouse position inside the card (via --mx/--my, set by a global mousemove
+   listener - see components/LiquidGlassTracker.tsx), like light catching
+   real glass. */
 .card::after {
   content: '';
   position: absolute;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
-  background: radial-gradient(circle, rgba(59,130,246,0.03) 0%, transparent 70%);
+  inset: 0;
+  background: radial-gradient(360px circle at var(--mx) var(--my), rgba(255,255,255,0.55), transparent 55%);
   opacity: 0;
-  transition: opacity 0.5s ease;
+  transition: opacity 0.4s ease;
   pointer-events: none;
 }
-
 .card:hover::after {
   opacity: 1;
-  animation: rotate 8s linear infinite;
 }
 
 .card:hover {
@@ -434,11 +479,13 @@ body::before {
   );
   border: 1px solid rgba(255, 255, 255, 0.85);
   box-shadow:
-    0 16px 48px rgba(0, 0, 0, 0.08),
-    0 4px 16px rgba(0, 0, 0, 0.06),
+    0 16px 48px rgba(90, 60, 40, 0.09),
+    0 4px 16px rgba(90, 60, 40, 0.06),
     inset 0 2px 4px 0 rgba(255, 255, 255, 0.9),
-    inset 0 -2px 2px 0 rgba(0, 0, 0, 0.03);
-  transform: translateY(-6px) scale(1.01);
+    inset 0 -2px 2px 0 rgba(90, 60, 40, 0.03);
+  /* transform is owned entirely by the JS spring tilt (see
+     LiquidGlassTracker.tsx) - a CSS transition on transform here would
+     fight the per-frame requestAnimationFrame updates and cause stutter. */
 }
 
 .card-interactive {
@@ -485,6 +532,7 @@ body::before {
   display: flex;
   align-items: center;
   gap: 12px;
+  font-family: var(--font-sans);
   font-size: 1.0625rem;
   font-weight: 700;
   color: var(--text-primary);
@@ -527,12 +575,15 @@ body::before {
 /* ================================
    NAVIGATION
 ================================ */
-.top-nav {
+/* ── Sidebar navigation (2026 pattern: persistent vertical rail
+   instead of a horizontal top bar) ── */
+.sidebar-nav {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0 2rem;
-  height: 72px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1.25rem;
+  padding: 1.75rem 1.25rem;
+  width: 264px;
   background: linear-gradient(
     180deg,
     rgba(255, 255, 255, 0.85) 0%,
@@ -540,14 +591,59 @@ body::before {
   );
   backdrop-filter: blur(40px) saturate(200%);
   -webkit-backdrop-filter: blur(40px) saturate(200%);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.7);
-  position: sticky;
+  border-right: 1px solid rgba(255, 255, 255, 0.7);
+  position: fixed;
   top: 0;
+  left: 0;
+  bottom: 0;
   z-index: 100;
   box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.06),
-    0 2px 8px rgba(0, 0, 0, 0.03),
-    inset 0 1px 2px 0 rgba(255, 255, 255, 0.9);
+    8px 0 32px rgba(90, 60, 40, 0.06),
+    2px 0 8px rgba(90, 60, 40, 0.03),
+    inset -1px 0 2px 0 rgba(255, 255, 255, 0.9);
+  overflow-y: auto;
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--divider);
+}
+
+.sidebar-brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.sidebar-brand-name {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  color: var(--text-primary);
+  line-height: 1;
+}
+
+.sidebar-brand-version {
+  font-size: 0.625rem;
+  color: var(--text-tertiary);
+  letter-spacing: 0.5px;
+  font-weight: 500;
+}
+
+.sidebar-section {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.sidebar-spacer {
+  flex: 1;
 }
 
 .nav-brand {
@@ -558,21 +654,22 @@ body::before {
   font-weight: 800;
   letter-spacing: -0.8px;
   color: var(--text-primary);
-  text-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  text-shadow: 0 1px 2px rgba(90,60,40,0.04);
 }
 
 .nav-brand-icon {
-  width: 48px;
-  height: 48px;
-  background: linear-gradient(135deg, #0066CC 0%, #004C99 100%);
-  border-radius: 16px;
+  width: 44px;
+  height: 44px;
+  background: linear-gradient(135deg, var(--blue) 0%, var(--blue-dark) 100%);
+  border-radius: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 24px;
+  font-size: 22px;
   color: #fff;
-  box-shadow: 0 8px 24px rgba(0,102,204,0.5), inset 0 1px 2px rgba(255,255,255,0.3);
+  box-shadow: 0 8px 24px rgba(93,125,166,0.4), inset 0 1px 2px rgba(255,255,255,0.3);
   border: 2px solid rgba(255,255,255,0.2);
+  flex-shrink: 0;
 }
 
 .nav-badge {
@@ -585,6 +682,8 @@ body::before {
   border: 2px solid var(--blue);
   color: var(--blue-dark);
   text-transform: uppercase;
+  display: flex;
+  align-items: center;
 }
 
 .nav-actions {
@@ -599,18 +698,37 @@ body::before {
   gap: 6px;
   font-size: 0.8rem;
   color: var(--text-secondary);
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(0,0,0,0.03);
+}
+
+/* Below this, the sidebar collapses to an icon-only rail so smaller
+   screens don't lose all their content width to a 264px sidebar. */
+@media (max-width: 900px) {
+  .sidebar-nav {
+    width: 76px;
+    padding: 1.25rem 0.75rem;
+    align-items: center;
+  }
+  .sidebar-brand-text,
+  .sidebar-section > *:not(:first-child) { display: none; }
+  .sidebar-brand { justify-content: center; padding-bottom: 1rem; }
+  .nav-badge { display: none; }
 }
 
 /* ================================
    TYPOGRAPHY HIERARCHY
 ================================ */
 .page-title {
+  font-family: var(--font-display);
   font-size: 2.75rem;
-  font-weight: 900;
-  letter-spacing: -1.5px;
+  font-weight: 600;
+  font-style: normal;
+  letter-spacing: -0.5px;
   color: var(--text-primary);
   line-height: 1.1;
-  text-shadow: 0 2px 4px rgba(0,0,0,0.06);
+  text-shadow: 0 2px 4px rgba(90,60,40,0.05);
   background: linear-gradient(135deg, var(--text-primary), var(--text-secondary));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -626,6 +744,7 @@ body::before {
 }
 
 .section-title {
+  font-family: var(--font-sans);
   font-size: 1.125rem;
   font-weight: 700;
   letter-spacing: -0.3px;
@@ -734,7 +853,7 @@ body::before {
 }
 
 .mono {
-  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-family: var(--font-mono);
 }
 
 /* Card List System */
@@ -848,6 +967,11 @@ body::before {
   color: var(--green-dark); 
   border: 2px solid var(--green);
   box-shadow: 0 2px 4px rgba(5,150,105,0.15);
+}
+.badge-gray {
+  background: rgba(0,0,0,0.04);
+  color: var(--text-tertiary);
+  border: 2px solid rgba(0,0,0,0.1);
 }
 .badge-red { 
   background: var(--red-light); 
@@ -1067,7 +1191,7 @@ body::before {
   border-radius: 16px;
   font-size: 0.9375rem;
   font-weight: 700;
-  font-family: 'SF Pro Display', 'Inter', sans-serif;
+  font-family: var(--font-sans);
   border: none;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -1129,53 +1253,56 @@ body::before {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #0066CC 0%, #004C99 100%);
+  background: linear-gradient(135deg, var(--blue) 0%, var(--blue-dark) 100%);
   color: white;
   border: 2px solid rgba(255,255,255,0.2);
-  box-shadow: 0 8px 24px rgba(0,102,204,0.35), 0 2px 6px rgba(0,0,0,0.1);
+  box-shadow: 0 8px 24px rgba(93,125,166,0.35), 0 2px 6px rgba(90,60,40,0.1);
 }
 .btn-primary:hover { 
-  background: linear-gradient(135deg, #0080FF 0%, #0066CC 100%);
-  box-shadow: 0 12px 32px rgba(0,102,204,0.5), 0 4px 12px rgba(0,0,0,0.15);
+  background: linear-gradient(135deg, var(--blue-bright) 0%, var(--blue) 100%);
+  box-shadow: 0 12px 32px rgba(93,125,166,0.5), 0 4px 12px rgba(90,60,40,0.15);
   transform: translateY(-3px);
   border-color: rgba(255,255,255,0.3);
 }
 
 .btn-dark {
-  background: linear-gradient(180deg, #1E293B 0%, #0F172A 100%);
+  background: linear-gradient(180deg, #3A3542 0%, #241F2B 100%);
   color: white;
   border: 2px solid transparent;
 }
 .btn-dark:hover {
-  background: linear-gradient(180deg, #334155 0%, #1E293B 100%);
-  box-shadow: 0 6px 20px rgba(15,23,42,0.4), 0 2px 4px rgba(0,0,0,0.15);
+  background: linear-gradient(180deg, #4A4452 0%, #3A3542 100%);
+  box-shadow: 0 6px 20px rgba(36,31,43,0.4), 0 2px 4px rgba(90,60,40,0.15);
   transform: translateY(-2px);
   border-color: rgba(255,255,255,0.1);
 }
 
+/* THE bold bright accent in action - reserved for the single most
+   important action on the whole app (activating an emergency), so it
+   truly stands out against the pastel palette everywhere else. */
 .btn-emergency {
-  background: linear-gradient(135deg, #DC2626 0%, #B91C1C 100%);
+  background: linear-gradient(135deg, var(--red-bright) 0%, var(--red) 100%);
   color: white;
   animation: pulse-ring 2s ease-in-out infinite;
   border: 2px solid rgba(255,255,255,0.25);
   font-weight: 800;
-  box-shadow: 0 8px 28px rgba(220,38,38,0.45), 0 2px 8px rgba(0,0,0,0.15);
+  box-shadow: 0 8px 28px rgba(255,59,92,0.4), 0 2px 8px rgba(90,60,40,0.15);
 }
 .btn-emergency:hover { 
-  background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%);
-  box-shadow: 0 16px 48px rgba(220,38,38,0.6), 0 4px 16px rgba(0,0,0,0.2);
+  background: linear-gradient(135deg, #FF5470 0%, var(--red-bright) 100%);
+  box-shadow: 0 16px 48px rgba(255,59,92,0.55), 0 4px 16px rgba(90,60,40,0.2);
   transform: translateY(-4px) scale(1.02);
   border-color: rgba(255,255,255,0.35);
 }
 
 .btn-success {
-  background: linear-gradient(180deg, #059669 0%, #047857 100%);
+  background: linear-gradient(180deg, var(--green) 0%, var(--green-dark) 100%);
   color: white;
   border: 2px solid transparent;
 }
 .btn-success:hover { 
-  background: linear-gradient(180deg, #10B981 0%, #059669 100%);
-  box-shadow: 0 6px 20px rgba(5,150,105,0.4), 0 2px 4px rgba(0,0,0,0.1);
+  background: linear-gradient(180deg, var(--green-bright) 0%, var(--green) 100%);
+  box-shadow: 0 6px 20px rgba(110,148,129,0.4), 0 2px 4px rgba(90,60,40,0.1);
   transform: translateY(-2px);
   border-color: rgba(255,255,255,0.2);
 }
@@ -1505,7 +1632,7 @@ body::before {
 }
 .log-entry:last-child { border-bottom: none; }
 .log-time { 
-  font-family: 'SF Mono', monospace; 
+  font-family: var(--font-mono); 
   font-size: 0.6875rem; 
   color: var(--text-tertiary); 
   white-space: nowrap;
@@ -1564,7 +1691,7 @@ body::before {
   border: 1px solid var(--divider);
   border-radius: var(--radius);
   color: var(--text-primary);
-  font-family: 'Inter', sans-serif;
+  font-family: var(--font-body);
   font-size: 0.9375rem;
   transition: var(--transition);
   box-shadow: var(--shadow-sm);
@@ -1724,6 +1851,35 @@ body::before {
   flex-direction: column;
   gap: 16px;
   color: var(--text-secondary);
+  margin-left: 264px;
+}
+.loading-screen-full {
+  margin-left: 0;
+  height: 100vh;
+}
+
+/* Skeleton loading - shaped placeholders instead of a spinner-only wait,
+   per the "staircase" loading pattern (see SkeletonLoader.tsx) */
+.skeleton-block {
+  background: linear-gradient(90deg, rgba(0,0,0,0.05) 25%, rgba(0,0,0,0.08) 50%, rgba(0,0,0,0.05) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.6s ease-in-out infinite;
+  border-radius: 8px;
+}
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.skeleton-card {
+  background: var(--bg-card);
+  backdrop-filter: var(--glass-blur);
+  border: var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: 1.75rem;
+}
+@media (max-width: 900px) {
+  .loading-screen { margin-left: 76px; }
+  .loading-screen-full { margin-left: 0; }
 }
 .spinner {
   width: 32px;
@@ -1738,8 +1894,7 @@ body::before {
    RESPONSIVE
 ================================ */
 @media (max-width: 768px) {
-  .container { padding: 1rem; }
-  .top-nav { padding: 0 1rem; }
+  .container { padding: 1rem 1rem 1rem 0; margin-left: 92px; }
   .page-title { font-size: 1.75rem; }
   .page-header { flex-direction: column; }
   .grid-2 { grid-template-columns: 1fr; }

@@ -1,12 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, Clock, BedDouble, CheckCheck, Siren, PhoneCall, MapPin } from 'lucide-react';
+import { Activity, Clock, BedDouble, CheckCheck, Siren, PhoneCall, MapPin, Plus, Minus } from 'lucide-react';
 import { useSSE } from '../hooks/usePoll';
 import Nav from '../components/Nav';
 import InteractiveMap from '../components/InteractiveMap';
 import { useToast } from '../components/Toast';
-import type { AmbulanceSession } from '../api';
-import { acknowledgeEmergency, togglePrepTask } from '../api';
+import type { AmbulanceSession, Hospital as HospitalType } from '../api';
+import { acknowledgeEmergency, togglePrepTask, fetchHospitals, updateHospitalCapacity } from '../api';
 import { LiveBadge, AnimatedProgress, CircularProgress, StatusPulse } from '../components/LiveIndicators';
+import CopyableText from '../components/CopyableText';
+import Tooltip from '../components/Tooltip';
+import { useStaircaseLoading, DashboardSkeleton } from '../components/SkeletonLoader';
+import VitalsMonitor from '../components/VitalsMonitor';
+import { soundManager } from '../utils/sound';
 
 type Severity = 'critical' | 'serious' | 'stable';
 
@@ -22,6 +27,35 @@ const Hospital: React.FC = () => {
 
   const [tick, setTick]           = useState(0);
   const [selectedRID, setSelectedRID] = useState<string | null>(null);
+  const [hospitals, setHospitals] = useState<HospitalType[]>([]);
+  const [savingBeds, setSavingBeds] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadHospitals = async () => {
+      try {
+        const data = await fetchHospitals();
+        setHospitals(data);
+      } catch (err) {
+        console.error('Failed to load hospitals', err);
+      }
+    };
+    loadHospitals();
+  }, []);
+
+  const handleBedUpdate = async (hospitalId: string, delta: number) => {
+    const h = hospitals.find(x => x.id === hospitalId);
+    if (!h) return;
+    const next = Math.max(0, Math.min(h.totalBeds, h.availableBeds + delta));
+    setSavingBeds(hospitalId);
+    try {
+      const res = await updateHospitalCapacity(hospitalId, next);
+      setHospitals(prev => prev.map(x => x.id === hospitalId ? res.hospital : x));
+    } catch (err: any) {
+      toast(err.message || 'Failed to update bed count', 'error');
+    } finally {
+      setSavingBeds(null);
+    }
+  };
 
   useEffect(() => {
     const id = setInterval(() => setTick(t => t + 1), 1000);
@@ -38,6 +72,7 @@ const Hospital: React.FC = () => {
     if (activeSessions.length > prevCount.current) {
       const newest = activeSessions[activeSessions.length - 1];
       toast(`Inbound emergency: ${newest.rid} — ${newest.patient?.condition ?? 'Activate bay prep'}`, 'error');
+      soundManager.playEmergencyAlert();
     }
     prevCount.current = activeSessions.length;
   }, [activeSessions.length]);
@@ -46,6 +81,7 @@ const Hospital: React.FC = () => {
     try {
       await acknowledgeEmergency(rid);
       toast(`Acknowledged incoming ${rid}`, 'success');
+      soundManager.playSuccess();
     } catch (err: any) {
       toast(err.message || 'Failed to acknowledge', 'error');
     }
@@ -77,21 +113,69 @@ const Hospital: React.FC = () => {
   // replaces the old hardcoded/derived fake checklist.
   const checklist = session?.prepTasks ?? [];
 
+  const loadStage = useStaircaseLoading(!state);
+
+  if (!state) return (
+    <>
+      <Nav roleName="Hospital Staff" roleColor="#86AB97" connected={connected} />
+      {loadStage === 'skeleton' ? <DashboardSkeleton /> : loadStage === 'spinner' ? (
+        <div className="loading-screen"><div className="spinner" /><span>Connecting to AERIS stream...</span></div>
+      ) : null}
+    </>
+  );
+
   return (
     <>
-      <Nav roleName="Hospital Staff" roleColor="#10b981" connected={connected} />
+      <Nav roleName="Hospital Staff" roleColor="#86AB97" connected={connected} />
       <div className="container animate-fade-up">
 
         <div className="page-header">
           <div>
             <h1 className="page-title">Emergency Reception</h1>
-            <p className="page-subtitle">City Hospital · Emergency Gateway · ICU Interface</p>
+            <p className="page-subtitle">{session ? `${session.hospital.name} · Emergency Gateway` : 'Emergency Gateway'} · ICU Interface</p>
           </div>
           <span className={`status-badge ${activeSessions.length > 0 ? 'badge-red' : 'badge-green'}`} style={{ fontSize: '0.85rem', padding: '8px 16px' }}>
             {activeSessions.length > 0
               ? `🔴 ${activeSessions.length} INBOUND UNIT${activeSessions.length > 1 ? 'S' : ''}`
               : '🟢 STANDBY — ALL CLEAR'}
           </span>
+        </div>
+
+        {/* Bed capacity - real-time, editable. Closes a gap that was in
+            the original spec's DB schema (emergencyCapacity: totalBeds,
+            availableBeds) but never implemented until now. */}
+        <div className="card mb-4 animate-fade-up">
+          <div className="section-title mb-3"><BedDouble size={14} /> Bed Capacity (all network hospitals)</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+            {hospitals.map(h => {
+              const pct = h.totalBeds > 0 ? (h.availableBeds / h.totalBeds) * 100 : 0;
+              const color = h.availableBeds === 0 ? 'var(--red-bright)' : pct <= 15 ? 'var(--orange)' : 'var(--green)';
+              return (
+                <div key={h.id} style={{ padding: '12px 14px', borderRadius: 12, background: 'rgba(0,0,0,0.02)', border: '1px solid rgba(0,0,0,0.05)' }}>
+                  <div className="text-sm font-semibold mb-1">{h.name}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <Tooltip label="Decrease available beds">
+                      <button onClick={() => handleBedUpdate(h.id, -1)} disabled={savingBeds === h.id || h.availableBeds <= 0} className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }}>
+                        <Minus size={12} />
+                      </button>
+                    </Tooltip>
+                    <div style={{ flex: 1, textAlign: 'center' }}>
+                      <span style={{ fontWeight: 800, fontSize: '1.1rem', color }}>{h.availableBeds}</span>
+                      <span className="text-xs text-quiet"> / {h.totalBeds} beds</span>
+                    </div>
+                    <Tooltip label="Increase available beds">
+                      <button onClick={() => handleBedUpdate(h.id, 1)} disabled={savingBeds === h.id || h.availableBeds >= h.totalBeds} className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }}>
+                        <Plus size={12} />
+                      </button>
+                    </Tooltip>
+                  </div>
+                  <div style={{ height: 5, borderRadius: 3, background: 'rgba(0,0,0,0.06)', marginTop: 8, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${pct}%`, background: color, transition: 'width 0.3s ease' }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         {activeSessions.length === 0 ? (
@@ -130,7 +214,7 @@ const Hospital: React.FC = () => {
                   <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 20, alignItems: 'center' }}>
                     <div>
                       <div className="section-title mb-2"><Siren size={15} color="var(--c-red)" /> Inbound Emergency Unit</div>
-                      <div className="mono font-extrabold" style={{ fontSize: '2rem', color: 'var(--c-red-bright)', letterSpacing: 2 }}>{session.rid}</div>
+                      <CopyableText value={session.rid} className="mono font-extrabold" style={{ fontSize: '2rem', color: 'var(--c-red-bright)', letterSpacing: 2 }} />
                       <div className="flex gap-2 mt-3" style={{ flexWrap: 'wrap' }}>
                         <span className="status-badge badge-red">Priority 1</span>
                         <span className="status-badge badge-yellow">Green Corridor</span>
@@ -142,11 +226,11 @@ const Hospital: React.FC = () => {
                     </div>
 
                     {/* ETA Clock */}
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', background: 'rgba(0,0,0,0.04)', borderRadius: 16, padding: '1.25rem 2rem', border: '1px solid rgba(245,158,11,0.3)', minWidth: 180, position: 'relative', overflow: 'hidden' }}>
-                      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, transparent, rgba(245,158,11,0.05), transparent)', animation: 'shimmer 3s infinite' }} />
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', background: 'rgba(0,0,0,0.04)', borderRadius: 16, padding: '1.25rem 2rem', border: '1px solid rgba(200,155,92,0.3)', minWidth: 180, position: 'relative', overflow: 'hidden' }}>
+                      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, transparent, rgba(200,155,92,0.05), transparent)', animation: 'shimmer 3s infinite' }} />
                       <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
                         <Clock size={28} color="var(--c-yellow)" style={{ marginBottom: 8, animation: 'pulse 2s ease-in-out infinite' }} />
-                        <div className="mono font-extrabold" style={{ fontSize: '2.8rem', color: 'var(--c-yellow)', lineHeight: 1, textShadow: '0 2px 8px rgba(245,158,11,0.3)' }}>{etaDisplay}</div>
+                        <div className="mono font-extrabold" style={{ fontSize: '2.8rem', color: 'var(--c-yellow)', lineHeight: 1, textShadow: '0 2px 8px rgba(200,155,92,0.3)' }}>{etaDisplay}</div>
                         <div className="text-xs text-muted mt-2" style={{ letterSpacing: 1 }}>ARRIVAL</div>
                         <div style={{ width: '100%', marginTop: 12 }}>
                           <AnimatedProgress value={etaProgress} height={6} color="var(--orange)" />
@@ -195,7 +279,7 @@ const Hospital: React.FC = () => {
                           return (
                             <div key={i} className="flex items-center gap-3 p-2 rounded" style={{
                               background: isCurr ? 'var(--c-green-dim)' : 'transparent',
-                              border: `1px solid ${isCurr ? 'rgba(34,197,94,0.2)' : 'transparent'}`,
+                              border: `1px solid ${isCurr ? 'rgba(110,148,129,0.2)' : 'transparent'}`,
                             }}>
                               <div className={`dot ${isCurr ? 'dot-green' : 'dot-inactive'}`} />
                               <span className="text-sm" style={{ color: isCurr ? 'var(--c-green)' : i < session.currentNodeIndex ? 'var(--text-tertiary)' : 'var(--text-secondary)', fontWeight: isCurr ? 600 : 400 }}>
@@ -223,7 +307,7 @@ const Hospital: React.FC = () => {
                             color="var(--green)"
                           />
                           {!session.hospitalAcknowledged
-                            ? <button onClick={() => handleAcknowledge(session.rid)} className="btn btn-success btn-sm">Acknowledge</button>
+                            ? <Tooltip label="Confirm your hospital has seen this incoming emergency"><button onClick={() => handleAcknowledge(session.rid)} className="btn btn-success btn-sm">Acknowledge</button></Tooltip>
                             : <StatusPulse status="active" label="ACK'D" size="md" />
                           }
                         </div>
@@ -238,12 +322,21 @@ const Hospital: React.FC = () => {
                       ))}
                     </div>
 
+                    {/* Live Patient Vitals - so hospital staff can prep based
+                        on the patient's ACTUAL current state in transit,
+                        not just the initial condition logged at pickup. */}
+                    <div className="card animate-fade-up">
+                      <div className="section-title mb-2">❤️ Live Vitals — {session.rid}</div>
+                      <VitalsMonitor vitals={session.vitals} severity={sev} />
+                    </div>
+
                     {/* Patient Profile */}
                     <div className="card animate-fade-up">
                       <div className="section-title"><PhoneCall size={14} /> Patient Profile</div>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px', fontSize: '0.8rem' }}>
                         {[
                           ['Case RID',       session.rid],
+                          ['Hospital',       session.hospital?.name || '—'],
                           ['Severity',       sev.toUpperCase()],
                           ['Department',     session.patient?.requiredDepartment || 'General Emergency'],
                           ['Route',          session.routeName],

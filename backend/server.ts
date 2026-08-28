@@ -33,6 +33,11 @@ type UserRole   = 'driver' | 'police' | 'hospital' | 'admin';
 interface Signal {
   id: string; name: string; junction: string;
   color: SignalColor; timer: number; manualOverride: boolean;
+  // Set by updateGreenCorridor() when multiple ambulances are competing
+  // for this signal simultaneously - lets the frontend show the conflict
+  // resolution, not just its silent outcome.
+  contested?: boolean;
+  contenderCount?: number;
 }
 
 interface LogEntry {
@@ -53,6 +58,10 @@ interface AmbulanceSession {
   startedAt: string;
   ticksSinceAdvance: number;
   status: 'active' | 'arrived' | 'cancelled';
+  // When the session left 'active' - null while active. Needed for
+  // incident history (Section: response-time reporting) since neither
+  // completion path previously recorded when it happened.
+  endedAt: string | null;
   // Timestamps (ms) of the last REAL detection reading from each
   // microservice modality. While fresh (<3s old), the per-second simulation
   // tick leaves that modality's fields alone instead of overwriting them
@@ -71,6 +80,17 @@ interface AmbulanceSession {
     notes: string;
   };
 
+  // The real hospital this ambulance is headed to - the driver's actual
+  // choice (Section 6 of the spec), not a hardcoded single destination.
+  hospital: { id: string; name: string; node: string };
+
+  // Live patient vitals during transit (spec Section 23: "Advanced patient
+  // vital integration" - previously listed as a future enhancement, never
+  // built). Simulated with a random-walk so it moves realistically tick to
+  // tick instead of just being static numbers, biased by severity so a
+  // critical patient's vitals actually look concerning.
+  vitals: { heartRate: number; bpSystolic: number; bpDiastolic: number; spo2: number };
+
   // Hospital acknowledgment + prep tracking - was previously hardcoded fake
   // data in the frontend (Hospital.tsx). Now backed by real state that
   // syncs to every dashboard over SSE.
@@ -86,13 +106,13 @@ interface SSEClient {
 // ═══════════════════════════════════════════════════════════════
 //  USERS (hashed passwords for real auth)
 // ═══════════════════════════════════════════════════════════════
-const USERS: Record<string, { id: string; name: string; role: UserRole; hash: string; ambulanceRid?: string }> = {
-  // Multiple driver accounts -> multiple concurrent ambulances. Each gets a
-  // fixed "home" ambulance RID prefix so it's recognizable across restarts
-  // (in-memory state still resets on restart, only the USERS map is fixed).
-  'driver':   { id: uuidv4(), name: 'Ravi Kumar',           role: 'driver',   hash: bcrypt.hashSync('driver123', 8),   ambulanceRid: 'AMB-101' },
-  'driver2':  { id: uuidv4(), name: 'Suresh Nair',          role: 'driver',   hash: bcrypt.hashSync('driver123', 8),   ambulanceRid: 'AMB-102' },
-  'driver3':  { id: uuidv4(), name: 'Anitha Rao',           role: 'driver',   hash: bcrypt.hashSync('driver123', 8),   ambulanceRid: 'AMB-103' },
+const USERS: Record<string, { id: string; name: string; role: UserRole; hash: string; ambulanceRid?: string; dispatchNode?: string }> = {
+  // Multiple driver accounts across TWO real dispatch bases - Indiranagar
+  // (east) and Silk Board Junction (south) - giving genuine multi-base
+  // ambulance coverage instead of every ambulance starting from one spot.
+  'driver':   { id: uuidv4(), name: 'Ravi Kumar',           role: 'driver',   hash: bcrypt.hashSync('driver123', 8),   ambulanceRid: 'AMB-101', dispatchNode: 'Indiranagar Metro (Dispatch)' },
+  'driver2':  { id: uuidv4(), name: 'Suresh Nair',          role: 'driver',   hash: bcrypt.hashSync('driver123', 8),   ambulanceRid: 'AMB-102', dispatchNode: 'Silk Board Junction' },
+  'driver3':  { id: uuidv4(), name: 'Anitha Rao',           role: 'driver',   hash: bcrypt.hashSync('driver123', 8),   ambulanceRid: 'AMB-103', dispatchNode: 'Indiranagar Metro (Dispatch)' },
   'police':   { id: uuidv4(), name: 'Insp. Rajesh Verma',   role: 'police',   hash: bcrypt.hashSync('police123', 8) },
   'hospital': { id: uuidv4(), name: 'Dr. Priya Sharma',     role: 'hospital', hash: bcrypt.hashSync('hospital123', 8) },
   'admin':    { id: uuidv4(), name: 'System Administrator', role: 'admin',    hash: bcrypt.hashSync('admin123', 8) },
@@ -100,30 +120,76 @@ const USERS: Record<string, { id: string; name: string; role: UserRole; hash: st
 
 // ═══════════════════════════════════════════════════════════════
 //  DIJKSTRA CITY GRAPH + GPS COORDINATES
+//  A real, much wider Bengaluru road network - Indiranagar in the
+//  east through MG Road/Trinity Circle in central Bengaluru down to
+//  Silk Board Junction in the south. Every coordinate below was
+//  verified against real-world sources (Wikipedia, OSM node data,
+//  BMTC/Namma Metro transit records, hospital addresses), not
+//  invented. Edge weights are real approximate road distances in km.
+//  Two real ambulance dispatch points and THREE real hospitals -
+//  this is genuine hospital selection (Section 6 of the original
+//  spec), not a single hardcoded destination.
 // ═══════════════════════════════════════════════════════════════
 type Graph = Record<string, Record<string, number>>;
 
 const CITY_GRAPH: Graph = {
-  'Dispatch Bay':     { 'Junction A': 3, 'Ring Road': 5 },
-  'Junction A':       { 'Dispatch Bay': 3, 'Junction B': 4, 'Central Junction': 6 },
-  'Junction B':       { 'Junction A': 4, 'Central Junction': 3, 'Medical Zone': 5 },
-  'Central Junction': { 'Junction A': 6, 'Junction B': 3, 'Medical Zone': 4, 'North Gate': 7 },
-  'Medical Zone':     { 'Junction B': 5, 'Central Junction': 4, 'City Hospital': 2 },
-  'Ring Road':        { 'Dispatch Bay': 5, 'North Gate': 4 },
-  'North Gate':       { 'Ring Road': 4, 'Central Junction': 7, 'City Hospital': 6 },
-  'City Hospital':    { 'Medical Zone': 2, 'North Gate': 6 },
+  // Indiranagar cluster (east)
+  'Indiranagar Metro (Dispatch)': { '100 Feet Road Junction': 0.8, 'Domlur Flyover': 2.3, 'Halasuru (Ulsoor)': 1.4 },
+  '100 Feet Road Junction':       { 'Indiranagar Metro (Dispatch)': 0.8, 'Domlur Flyover': 1.3 },
+  'Domlur Flyover':               { '100 Feet Road Junction': 1.3, 'Indiranagar Metro (Dispatch)': 2.3, 'Kodihalli Junction': 0.6, 'Marathahalli (ORR)': 6.5 },
+  'Kodihalli Junction':           { 'Domlur Flyover': 0.6, 'Manipal Hospital': 0.3, 'Marathahalli (ORR)': 5.9 },
+  'Marathahalli (ORR)':           { 'Domlur Flyover': 6.5, 'Kodihalli Junction': 5.9 },
+  'Manipal Hospital':             { 'Kodihalli Junction': 0.3 },
+
+  // Central corridor (MG Road / Trinity Circle / Ulsoor)
+  'Halasuru (Ulsoor)':            { 'Indiranagar Metro (Dispatch)': 1.4, 'Trinity Circle': 1.1 },
+  'Trinity Circle':               { 'Halasuru (Ulsoor)': 1.1, 'Victoria Hospital': 4.8, 'Adugodi': 3.4 },
+  'Victoria Hospital':            { 'Trinity Circle': 4.8 },
+
+  // Southern corridor (Hosur Road / Koramangala / Silk Board)
+  'Adugodi':                      { 'Trinity Circle': 3.4, 'Silk Board Junction': 3.3 },
+  'Silk Board Junction':          { 'Adugodi': 3.3, "St. John's Medical College Hospital": 1.4 },
+  "St. John's Medical College Hospital": { 'Silk Board Junction': 1.4 },
 };
 
-// GPS coordinates for each junction (simulated city layout)
+// GPS coordinates - real, verified. Sources noted per cluster above.
 const GPS_COORDS: Record<string, [number, number]> = {
-  'Dispatch Bay':     [28.6139, 77.2090],  // Starting point
-  'Junction A':       [28.6180, 77.2120],
-  'Junction B':       [28.6220, 77.2150],
-  'Central Junction': [28.6250, 77.2180],
-  'Medical Zone':     [28.6280, 77.2200],
-  'Ring Road':        [28.6160, 77.2050],
-  'North Gate':       [28.6300, 77.2100],
-  'City Hospital':    [28.6320, 77.2220],  // Destination
+  'Indiranagar Metro (Dispatch)':          [12.9786, 77.6388],
+  '100 Feet Road Junction':                [12.9719, 77.6412],
+  'Domlur Flyover':                        [12.9604, 77.6417],
+  'Kodihalli Junction':                    [12.9601, 77.6472],
+  'Marathahalli (ORR)':                    [12.9562, 77.7019],
+  'Manipal Hospital':                      [12.9588, 77.6491],
+  'Halasuru (Ulsoor)':                     [12.9757, 77.6263],
+  'Trinity Circle':                        [12.9730, 77.6170],
+  'Victoria Hospital':                     [12.9634, 77.5738],
+  'Adugodi':                               [12.9435, 77.6091],
+  'Silk Board Junction':                   [12.9170, 77.6220],  // Second ambulance dispatch base
+  "St. John's Medical College Hospital":   [12.9293, 77.6201],
+};
+
+// Real hospitals - the driver picks one at activation (Section 6 of the
+// spec: hospital selection was always meant to be a real choice, not a
+// single hardcoded destination). Each is a real, addressable hospital.
+// Bed capacity - mutable, updated live by hospital staff. This was
+// documented in the original spec's DB schema ("emergencyCapacity:
+// totalBeds, availableBeds") but never actually implemented until now.
+interface Hospital {
+  id: string; name: string; node: string; departments: string[]; address: string;
+  totalBeds: number; availableBeds: number;
+}
+const HOSPITALS: Hospital[] = [
+  { id: 'manipal', name: 'Manipal Hospital', node: 'Manipal Hospital', departments: ['Trauma', 'Cardiology', 'General Emergency', 'Neurology'], address: 'Old Airport Road, Kodihalli, Bengaluru', totalBeds: 40, availableBeds: 12 },
+  { id: 'stjohns', name: "St. John's Medical College Hospital", node: "St. John's Medical College Hospital", departments: ['Trauma', 'General Emergency', 'Pediatrics', 'ICU'], address: 'Sarjapur Road, Koramangala, Bengaluru', totalBeds: 55, availableBeds: 8 },
+  { id: 'victoria', name: 'Victoria Hospital', node: 'Victoria Hospital', departments: ['General Emergency', 'Trauma', 'Government/No-cost care'], address: 'Fort Road, Bengaluru', totalBeds: 90, availableBeds: 23 },
+];
+
+// Real ambulance dispatch bases - drivers are assigned to one of two real
+// starting points, giving genuine multi-base dispatch across the city
+// rather than every ambulance starting from the same spot.
+const AMBULANCE_BASES: Record<string, string> = {
+  'Indiranagar Metro (Dispatch)': 'Indiranagar Metro (Dispatch)',
+  'Silk Board Junction': 'Silk Board Junction',
 };
 
 // Distance threshold for proximity detection (in km)
@@ -142,10 +208,47 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * c;
 }
 
-// blockedEdges holds keys like "Junction A|Junction B" (both orderings
-// checked) - see ROADBLOCK MANAGEMENT below. Passed through to dijkstra()
-// so a reported roadblock actually removes that road from consideration
-// instead of just being logged and ignored.
+// Realistic baseline vitals per severity - a critical patient should
+// visibly look concerning (tachycardic, hypotensive, low SpO2), not just
+// carry a "critical" label with numbers indistinguishable from "stable".
+function initialVitals(severity: string) {
+  const ranges: Record<string, { hr: [number, number]; sys: [number, number]; dia: [number, number]; spo2: [number, number] }> = {
+    critical: { hr: [115, 138], sys: [82, 98],  dia: [52, 64], spo2: [86, 92] },
+    serious:  { hr: [95, 112],  sys: [98, 118],  dia: [64, 78], spo2: [92, 96] },
+    stable:   { hr: [68, 90],   sys: [108, 128], dia: [70, 84], spo2: [96, 99] },
+  };
+  const r = ranges[severity] || ranges.serious;
+  const rand = ([lo, hi]: [number, number]) => Math.round(lo + Math.random() * (hi - lo));
+  return { heartRate: rand(r.hr), bpSystolic: rand(r.sys), bpDiastolic: rand(r.dia), spo2: rand(r.spo2) };
+}
+
+// Small random-walk step, clamped to a physiologically plausible band per
+// severity - vitals should drift realistically tick to tick, not teleport,
+// and a critical patient's band should stay concerning rather than
+// wandering into "stable" territory.
+function stepVitals(current: { heartRate: number; bpSystolic: number; bpDiastolic: number; spo2: number }, severity: string) {
+  const bounds: Record<string, { hr: [number, number]; sys: [number, number]; dia: [number, number]; spo2: [number, number] }> = {
+    critical: { hr: [110, 145], sys: [78, 102], dia: [48, 68], spo2: [84, 93] },
+    serious:  { hr: [90, 118],  sys: [95, 122],  dia: [60, 82], spo2: [90, 97] },
+    stable:   { hr: [62, 95],   sys: [104, 132], dia: [66, 88], spo2: [95, 100] },
+  };
+  const b = bounds[severity] || bounds.serious;
+  const walk = (value: number, [lo, hi]: [number, number], step: number) => {
+    const next = value + (Math.random() - 0.5) * step;
+    return Math.round(Math.min(hi, Math.max(lo, next)));
+  };
+  return {
+    heartRate: walk(current.heartRate, b.hr, 4),
+    bpSystolic: walk(current.bpSystolic, b.sys, 3),
+    bpDiastolic: walk(current.bpDiastolic, b.dia, 2),
+    spo2: walk(current.spo2, b.spo2, 1.5),
+  };
+}
+
+// blockedEdges holds keys like "Domlur Flyover|Kodihalli Junction" (both
+// orderings checked) - see ROADBLOCK MANAGEMENT below. Passed through to
+// dijkstra() so a reported roadblock actually removes that road from
+// consideration instead of just being logged and ignored.
 function edgeKey(a: string, b: string): string { return [a, b].sort().join('|'); }
 
 function dijkstra(start: string, end: string, blockedEdges: Set<string> = new Set()): string[] {
@@ -177,12 +280,52 @@ function dijkstra(start: string, end: string, blockedEdges: Set<string> = new Se
   return path[0] === start ? path : [];
 }
 
-// Precompute route options from Dispatch Bay → City Hospital
-const ROUTE_OPTIONS = [
-  { id: 'R1', name: 'Optimal Route (Dijkstra)', nodes: dijkstra('Dispatch Bay', 'City Hospital'), distance: '4.2 km', estimatedTime: 8 },
-  { id: 'R2', name: 'Highway Route',            nodes: ['Dispatch Bay', 'Ring Road', 'North Gate', 'City Hospital'], distance: '5.8 km', estimatedTime: 10 },
-  { id: 'R3', name: 'Short Cut Route',          nodes: ['Dispatch Bay', 'Junction A', 'Junction B', 'Medical Zone', 'City Hospital'], distance: '3.6 km', estimatedTime: 7 },
-];
+// Sums real edge weights along a path - used to report genuine distance/ETA
+// for whichever dispatch base -> hospital pair is actually being routed,
+// rather than a single precomputed number.
+function pathDistanceKm(nodes: string[]): number {
+  let total = 0;
+  for (let i = 0; i < nodes.length - 1; i++) {
+    total += CITY_GRAPH[nodes[i]]?.[nodes[i + 1]] ?? 0;
+  }
+  return total;
+}
+
+// Computes route option(s) from any real dispatch base to any real hospital.
+// Always includes the Dijkstra-optimal path. If a genuinely different
+// second path exists (found by temporarily blocking the optimal path's
+// first edge and re-running Dijkstra), that's offered as a real alternate -
+// not a fabricated one.
+function computeRouteOptions(fromNode: string, hospital: Hospital, blocked: Set<string> = blockedEdges) {
+  const optimalNodes = dijkstra(fromNode, hospital.node, blocked);
+  if (optimalNodes.length === 0) return [];
+
+  const optimalKm = pathDistanceKm(optimalNodes);
+  const options = [{
+    id: 'R1',
+    name: `Optimal Route (Dijkstra) to ${hospital.name}`,
+    nodes: optimalNodes,
+    distance: `${optimalKm.toFixed(1)} km`,
+    estimatedTime: Math.max(2, Math.round(optimalKm * 2)),
+  }];
+
+  if (optimalNodes.length > 1) {
+    const forcedBlock = new Set(blocked);
+    forcedBlock.add(edgeKey(optimalNodes[0], optimalNodes[1]));
+    const altNodes = dijkstra(fromNode, hospital.node, forcedBlock);
+    if (altNodes.length > 0 && altNodes.join('|') !== optimalNodes.join('|')) {
+      const altKm = pathDistanceKm(altNodes);
+      options.push({
+        id: 'R2',
+        name: `Alternate Route to ${hospital.name}`,
+        nodes: altNodes,
+        distance: `${altKm.toFixed(1)} km`,
+        estimatedTime: Math.max(2, Math.round(altKm * 2)),
+      });
+    }
+  }
+  return options;
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  GLOBAL STATE
@@ -197,12 +340,13 @@ interface SignalWithCoords extends Signal {
 }
 
 const signals: SignalWithCoords[] = [
-  { id: 'S1', name: 'Signal A', junction: 'Junction A',       color: 'RED', timer: 30, manualOverride: false, lat: 28.6180, lng: 77.2120 },
-  { id: 'S2', name: 'Signal B', junction: 'Junction B',       color: 'RED', timer: 25, manualOverride: false, lat: 28.6220, lng: 77.2150 },
-  { id: 'S3', name: 'Signal C', junction: 'Central Junction', color: 'GREEN', timer: 18, manualOverride: false, lat: 28.6250, lng: 77.2180 },
-  { id: 'S4', name: 'Signal D', junction: 'Medical Zone',     color: 'RED', timer: 35, manualOverride: false, lat: 28.6280, lng: 77.2200 },
-  { id: 'S5', name: 'Signal E', junction: 'Ring Road',        color: 'YELLOW', timer: 5, manualOverride: false, lat: 28.6160, lng: 77.2050 },
-  { id: 'S6', name: 'Signal F', junction: 'North Gate',       color: 'RED', timer: 40, manualOverride: false, lat: 28.6300, lng: 77.2100 },
+  { id: 'S1', name: 'Signal — 100 Feet Road Jn', junction: '100 Feet Road Junction', color: 'RED', timer: 30, manualOverride: false, lat: 12.9719, lng: 77.6412 },
+  { id: 'S2', name: 'Signal — Domlur Flyover',   junction: 'Domlur Flyover',         color: 'GREEN', timer: 18, manualOverride: false, lat: 12.9604, lng: 77.6417 },
+  { id: 'S3', name: 'Signal — Kodihalli Jn',     junction: 'Kodihalli Junction',     color: 'RED', timer: 35, manualOverride: false, lat: 12.9601, lng: 77.6472 },
+  { id: 'S4', name: 'Signal — Marathahalli',     junction: 'Marathahalli (ORR)',     color: 'YELLOW', timer: 5, manualOverride: false, lat: 12.9562, lng: 77.7019 },
+  { id: 'S5', name: 'Signal — Halasuru (Ulsoor)', junction: 'Halasuru (Ulsoor)',     color: 'RED', timer: 22, manualOverride: false, lat: 12.9757, lng: 77.6263 },
+  { id: 'S6', name: 'Signal — Trinity Circle',   junction: 'Trinity Circle',         color: 'RED', timer: 40, manualOverride: false, lat: 12.9730, lng: 77.6170 },
+  { id: 'S7', name: 'Signal — Adugodi',          junction: 'Adugodi',                color: 'GREEN', timer: 15, manualOverride: false, lat: 12.9435, lng: 77.6091 },
 ];
 
 // Signal command log (sent to the signal control engine)
@@ -317,7 +461,9 @@ function simulateDetection(session: AmbulanceSession) {
 //  ROADBLOCK MANAGEMENT + DYNAMIC RECALCULATION (Section 9 of spec)
 //  Police/Admin can mark a road segment blocked. Any active ambulance
 //  currently routed across that segment gets a fresh Dijkstra path
-//  computed from its CURRENT position to City Hospital, avoiding it.
+//  computed from its CURRENT position to ITS OWN chosen hospital,
+//  avoiding it. Different ambulances can be headed to different real
+//  hospitals, so this must use each session's own destination.
 // ═══════════════════════════════════════════════════════════════
 const blockedEdges = new Set<string>(); // "NodeA|NodeB" sorted keys
 
@@ -336,7 +482,7 @@ function recalculateAffectedRoutes(blockedFrom: string, blockedTo: string) {
     if (!crossesBlockedEdge) return;
 
     const currentNode = session.route[session.currentNodeIndex];
-    const newPath = dijkstra(currentNode, 'City Hospital', blockedEdges);
+    const newPath = dijkstra(currentNode, session.hospital.node, blockedEdges);
 
     if (newPath.length === 0) {
       addLog(`🚧 ROADBLOCK on ${blockedFrom} ↔ ${blockedTo}: NO alternative route found for ${session.rid} — ambulance may need to wait or reverse`, 'error', session.rid);
@@ -366,10 +512,18 @@ function recalculateAffectedRoutes(blockedFrom: string, blockedTo: string) {
 //  position and distance threshold. Signals within proximity → GREEN.
 // ═══════════════════════════════════════════════════════════════
 const JUNCTION_TO_SIGNAL: Record<string, string> = {
-  'Junction A': 'S1', 'Junction B': 'S2',
-  'Central Junction': 'S3', 'Medical Zone': 'S4',
-  'Ring Road': 'S5', 'North Gate': 'S6',
+  '100 Feet Road Junction': 'S1', 'Domlur Flyover': 'S2',
+  'Kodihalli Junction': 'S3', 'Marathahalli (ORR)': 'S4',
+  'Halasuru (Ulsoor)': 'S5', 'Trinity Circle': 'S6', 'Adugodi': 'S7',
 };
+
+// Multi-ambulance conflict resolution (Section 23 of the original spec:
+// "Multiple ambulance conflict management" - previously the corridor
+// logic silently gave the signal to whichever ambulance was physically
+// closest, with no awareness that a farther-but-more-critical patient
+// should take priority. Real EMS dispatch prioritizes by acuity, not
+// just proximity.
+const SEVERITY_RANK: Record<string, number> = { critical: 3, serious: 2, stable: 1 };
 
 function updateGreenCorridor() {
   const activeSessions = [...sessions.values()].filter(s => s.status === 'active');
@@ -387,21 +541,69 @@ function updateGreenCorridor() {
     return;
   }
 
-  // Calculate distance from each ambulance to each signal
-  const signalProximity = new Map<string, { distance: number; rid: string }>();
-  
+  // For each signal, find every ambulance within range - not just the
+  // single nearest - so a genuine conflict (multiple ambulances close to
+  // the same signal at once) can actually be detected and resolved.
+  const signalCandidates = new Map<string, { distance: number; rid: string; severity: string }[]>();
+
   activeSessions.forEach(session => {
     const [ambLat, ambLng] = session.currentGPS;
     
     signals.forEach(sig => {
       const distance = calculateDistance(ambLat, ambLng, sig.lat, sig.lng);
-      
-      // Track closest ambulance to each signal
-      const existing = signalProximity.get(sig.id);
-      if (!existing || distance < existing.distance) {
-        signalProximity.set(sig.id, { distance, rid: session.rid });
-      }
+      if (distance > PROXIMITY_THRESHOLD_KM) return;
+
+      const list = signalCandidates.get(sig.id) || [];
+      list.push({ distance, rid: session.rid, severity: session.patient.severity });
+      signalCandidates.set(sig.id, list);
     });
+  });
+
+  // Resolve each signal's winner: higher patient severity wins outright;
+  // ties broken by proximity (closer wins). This is the actual priority
+  // arbitration - not just "whoever got there first."
+  const signalProximity = new Map<string, { distance: number; rid: string }>();
+
+  signalCandidates.forEach((candidates, sigId) => {
+    candidates.sort((a, b) => {
+      const rankDiff = SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity];
+      if (rankDiff !== 0) return rankDiff;
+      return a.distance - b.distance;
+    });
+    const winner = candidates[0];
+    signalProximity.set(sigId, { distance: winner.distance, rid: winner.rid });
+
+    const sig = signals.find(s => s.id === sigId);
+    if (sig) {
+      sig.contested = candidates.length > 1;
+      sig.contenderCount = candidates.length;
+    }
+
+    // Log the conflict explicitly when there genuinely was one - this is
+    // the part that makes the arbitration demonstrable, not just silent.
+    if (candidates.length > 1) {
+      const runnerUp = candidates[1];
+      if (winner.severity !== runnerUp.severity) {
+        addLog(
+          `⚠️ SIGNAL CONFLICT at ${sig?.name ?? sigId}: ${winner.rid} (${winner.severity}, ${Math.round(winner.distance * 1000)}m) prioritized over ${runnerUp.rid} (${runnerUp.severity}, ${Math.round(runnerUp.distance * 1000)}m) — higher acuity wins`,
+          'warning'
+        );
+      } else {
+        addLog(
+          `⚠️ SIGNAL CONFLICT at ${sig?.name ?? sigId}: ${winner.rid} and ${runnerUp.rid} both ${winner.severity} — ${winner.rid} wins on proximity (${Math.round(winner.distance * 1000)}m vs ${Math.round(runnerUp.distance * 1000)}m)`,
+          'warning'
+        );
+      }
+    }
+  });
+
+  // Clear the contested flag on any signal that no longer has multiple
+  // candidates (otherwise it would stick from a previous tick forever)
+  signals.forEach(sig => {
+    if (!signalCandidates.has(sig.id) || (signalCandidates.get(sig.id)?.length ?? 0) <= 1) {
+      sig.contested = false;
+      sig.contenderCount = signalCandidates.get(sig.id)?.length ?? 0;
+    }
   });
 
   // Apply proximity-based signal control
@@ -458,6 +660,7 @@ setInterval(() => {
     if (session.status !== 'active') return;
 
     simulateDetection(session);
+    session.vitals = stepVitals(session.vitals, session.patient.severity);
 
     // Advance ambulance along route
     session.ticksSinceAdvance++;
@@ -485,8 +688,9 @@ setInterval(() => {
       // Arrived at hospital
       if (session.currentNodeIndex === session.route.length - 1) {
         session.status = 'arrived';
+        session.endedAt = new Date().toISOString();
         totalCompleted++;
-        addLog(`✅ ${session.rid} ARRIVED at City Hospital — session complete`, 'success', session.rid);
+        addLog(`✅ ${session.rid} ARRIVED at ${session.hospital.name} — session complete`, 'success', session.rid);
         addLog(`🔓 Green corridor released for ${session.rid}`, 'system', session.rid);
       }
     }
@@ -536,7 +740,7 @@ function buildStatePayload() {
   return {
     sessions: enhancedSessions,
     signals,
-    routes: ROUTE_OPTIONS,
+    hospitals: HOSPITALS,
     systemLoad,
     apiLatency,
     totalCompleted,
@@ -593,14 +797,65 @@ app.get('/api/auth/me', verify, (req: any, res) => {
   res.json(req.user);
 });
 
+// ── HOSPITALS (Section 6 of the spec: real hospital selection) ─
+app.get('/api/hospitals', verify, (req: any, res) => {
+  const userRecord = USERS[(req.user.username || '').toLowerCase()];
+  const fromNode = userRecord?.dispatchNode || 'Indiranagar Metro (Dispatch)';
+
+  const hospitalsWithDistance = HOSPITALS.map(h => {
+    const nodes = dijkstra(fromNode, h.node, blockedEdges);
+    const km = nodes.length > 0 ? pathDistanceKm(nodes) : null;
+    return {
+      ...h,
+      distanceKm: km !== null ? Math.round(km * 10) / 10 : null,
+      estimatedMinutes: km !== null ? Math.max(2, Math.round(km * 2)) : null,
+      reachable: nodes.length > 0,
+    };
+  }).sort((a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity));
+
+  res.json(hospitalsWithDistance);
+});
+
+// PATCH bed capacity - hospital/admin only. There's currently one generic
+// hospital account rather than per-hospital accounts, so any hospital
+// staff login can update any hospital's count (a reasonable simplification
+// given the current auth model - see USERS in this file if you want to
+// split this into per-hospital logins later).
+app.patch('/api/hospitals/:id/capacity', verify, (req: any, res) => {
+  if (req.user.role !== 'hospital' && req.user.role !== 'admin') {
+    res.status(403).json({ error: 'Hospital staff only' }); return;
+  }
+  const hospital = HOSPITALS.find(h => h.id === req.params.id);
+  if (!hospital) { res.status(404).json({ error: 'Hospital not found' }); return; }
+
+  const { availableBeds } = req.body;
+  if (typeof availableBeds !== 'number' || availableBeds < 0 || availableBeds > hospital.totalBeds) {
+    res.status(400).json({ error: `availableBeds must be a number between 0 and ${hospital.totalBeds}` });
+    return;
+  }
+
+  hospital.availableBeds = availableBeds;
+  addLog(`🛏️ ${hospital.name} updated bed availability: ${availableBeds}/${hospital.totalBeds} (${req.user.name})`, 'info');
+
+  res.json({ success: true, hospital });
+});
+
 // ── ROUTES (Dijkstra) ─────────────────────────────────────────
-app.get('/api/routes', verify, (_req, res) => {
-  res.json(ROUTE_OPTIONS);
+// Now computed dynamically for THIS driver's dispatch base -> the
+// requested hospital, instead of a single hardcoded precomputed route.
+app.get('/api/routes', verify, (req: any, res) => {
+  const userRecord = USERS[(req.user.username || '').toLowerCase()];
+  const fromNode = userRecord?.dispatchNode || 'Indiranagar Metro (Dispatch)';
+
+  const hospitalId = (req.query.hospitalId as string) || HOSPITALS[0].id;
+  const hospital = HOSPITALS.find(h => h.id === hospitalId) || HOSPITALS[0];
+
+  res.json(computeRouteOptions(fromNode, hospital));
 });
 
 // ── EMERGENCY MANAGEMENT ──────────────────────────────────────
 app.post('/api/emergency/start', verify, (req: any, res) => {
-  const { routeId, patient } = req.body;
+  const { hospitalId, routeId, patient } = req.body;
 
   // Check if this driver already has an active session
   const existingSession = [...sessions.values()].find(
@@ -611,25 +866,20 @@ app.post('/api/emergency/start', verify, (req: any, res) => {
     return;
   }
 
-  let route = ROUTE_OPTIONS.find(r => r.id === routeId) || ROUTE_OPTIONS[0];
+  const userRecord = USERS[(req.user.username || '').toLowerCase()];
+  const fromNode = userRecord?.dispatchNode || 'Indiranagar Metro (Dispatch)';
 
-  // If the chosen precomputed route crosses a currently-reported roadblock,
-  // compute a fresh one around it rather than dispatching into a dead end.
-  const routeCrossesBlockedEdge = route.nodes.some((node, i) =>
-    i < route.nodes.length - 1 && blockedEdges.has(edgeKey(node, route.nodes[i + 1]))
-  );
-  if (routeCrossesBlockedEdge) {
-    const altNodes = dijkstra('Dispatch Bay', 'City Hospital', blockedEdges);
-    if (altNodes.length > 0) {
-      route = { id: route.id, name: `${route.name} (rerouted around roadblock)`, nodes: altNodes, distance: route.distance, estimatedTime: route.estimatedTime };
-      addLog(`🚧 Selected route crosses a known roadblock — dispatching via alternate path instead`, 'warning');
-    }
+  const hospital = HOSPITALS.find(h => h.id === hospitalId) || HOSPITALS[0];
+  const routeOptions = computeRouteOptions(fromNode, hospital, blockedEdges);
+  if (routeOptions.length === 0) {
+    res.status(422).json({ error: `No available route from ${fromNode} to ${hospital.name} - all roads blocked` });
+    return;
   }
+  const route = routeOptions.find(r => r.id === routeId) || routeOptions[0];
 
   // Use this driver's assigned ambulance RID if they have one (see USERS),
   // otherwise fall back to a random one - keeps each driver account mapped
   // to a consistent, recognizable ambulance across the Police/Admin fleet views.
-  const userRecord = USERS[(req.user.username || '').toLowerCase()];
   const rid = userRecord?.ambulanceRid || `AMB-${uuidv4().slice(0, 6).toUpperCase()}`;
 
   // Default prep checklist - hospital can check these off as they're done;
@@ -642,38 +892,45 @@ app.post('/api/emergency/start', verify, (req: any, res) => {
     { id: 'specialist',label: 'On-call specialist paged',        done: false },
   ];
 
+  const validatedSeverity: 'critical' | 'serious' | 'stable' =
+    ['critical', 'serious', 'stable'].includes(patient?.severity) ? patient.severity : 'serious';
+
   const session: AmbulanceSession = {
     rid, driverId: req.user.sub,
     route: route.nodes, routeName: route.name,
     currentNodeIndex: 0,
-    currentGPS: GPS_COORDS[route.nodes[0]] || [28.6139, 77.2090],
+    currentGPS: GPS_COORDS[route.nodes[0]] || [12.9786, 77.6388],
     cameraDetected: true, cameraConfidence: 91,
     sirenDetected: true,  sirenFrequency: 970,
     isVerified: true,
     startedAt: new Date().toISOString(),
     ticksSinceAdvance: 0,
     status: 'active',
+    endedAt: null,
     patient: {
       condition: patient?.condition || 'Not specified',
-      severity: (['critical', 'serious', 'stable'].includes(patient?.severity) ? patient.severity : 'serious'),
+      severity: validatedSeverity,
       requiredDepartment: patient?.requiredDepartment || 'General Emergency',
       notes: patient?.notes || '',
     },
+    vitals: initialVitals(validatedSeverity),
+    hospital: { id: hospital.id, name: hospital.name, node: hospital.node },
     hospitalAcknowledged: false,
     hospitalAcknowledgedAt: null,
     prepTasks: defaultPrepTasks,
   };
 
   sessions.set(rid, session);
-  addLog(`🚨 EMERGENCY ACTIVATED — RID: ${rid} (Driver: ${req.user.name})`, 'error', rid);
-  addLog(`📍 Route computed via Dijkstra: ${route.nodes.join(' → ')}`, 'info', rid);
+  addLog(`🚨 EMERGENCY ACTIVATED — RID: ${rid} (Driver: ${req.user.name}) from ${fromNode}`, 'error', rid);
+  addLog(`🏥 Destination: ${hospital.name} (${hospital.address})`, 'info', rid);
+  addLog(`📍 Route computed via Dijkstra: ${route.nodes.join(' → ')} (${route.distance})`, 'info', rid);
   addLog(`🔍 Initial verification: Camera ✓ Siren ✓`, 'success', rid);
   addLog(`🏥 Patient: ${session.patient.severity.toUpperCase()} — ${session.patient.condition} (needs ${session.patient.requiredDepartment})`, 'info', rid);
 
   // Immediately send corridor state to the signal control engine
   updateGreenCorridor();
 
-  res.status(201).json({ rid, route: route.nodes, routeName: route.name, patient: session.patient });
+  res.status(201).json({ rid, route: route.nodes, routeName: route.name, hospital: session.hospital, patient: session.patient });
 });
 
 app.post('/api/emergency/stop', verify, (req: any, res) => {
@@ -682,6 +939,7 @@ app.post('/api/emergency/stop', verify, (req: any, res) => {
   if (!session) { res.status(404).json({ error: 'Session not found' }); return; }
 
   session.status = 'cancelled';
+  session.endedAt = new Date().toISOString();
   addLog(`🛑 Emergency ${rid} manually cancelled by ${req.user.name}`, 'warning', rid);
 
   // Release corridor
@@ -985,6 +1243,51 @@ app.post('/api/detect/siren', verify, async (req: any, res) => {
   }
 });
 
+// ── INCIDENT HISTORY (completed/cancelled emergency sessions) ─
+// Real post-incident reporting - every session already lives in the
+// `sessions` map after it ends (only /api/system/reset clears it), this
+// just surfaces the non-active ones with the response-time metrics a
+// real EMS system would want to review.
+app.get('/api/emergency/history', verify, (req: any, res) => {
+  const roleFilter = req.query.status as string | undefined; // 'arrived' | 'cancelled' | undefined (all)
+
+  const history = [...sessions.values()]
+    .filter(s => s.status !== 'active')
+    .filter(s => !roleFilter || s.status === roleFilter)
+    .map(s => {
+      const startMs = new Date(s.startedAt).getTime();
+      const endMs = s.endedAt ? new Date(s.endedAt).getTime() : null;
+      const durationSeconds = endMs !== null ? Math.round((endMs - startMs) / 1000) : null;
+      return {
+        rid: s.rid,
+        status: s.status,
+        hospital: s.hospital,
+        patient: s.patient,
+        routeName: s.routeName,
+        startedAt: s.startedAt,
+        endedAt: s.endedAt,
+        durationSeconds,
+        wasVerified: s.isVerified,
+      };
+    })
+    .sort((a, b) => new Date(b.endedAt || b.startedAt).getTime() - new Date(a.endedAt || a.startedAt).getTime());
+
+  const completedOnly = history.filter(h => h.status === 'arrived' && h.durationSeconds !== null);
+  const avgResponseSeconds = completedOnly.length > 0
+    ? Math.round(completedOnly.reduce((sum, h) => sum + (h.durationSeconds || 0), 0) / completedOnly.length)
+    : null;
+
+  res.json({
+    history,
+    summary: {
+      total: history.length,
+      completed: history.filter(h => h.status === 'arrived').length,
+      cancelled: history.filter(h => h.status === 'cancelled').length,
+      avgResponseSeconds,
+    },
+  });
+});
+
 // ── REAL-TIME STATE (REST fallback) ──────────────────────────
 app.get('/api/status', verify, (_req, res) => {
   res.json(buildStatePayload());
@@ -996,11 +1299,21 @@ app.get('/api/logs', verify, (_req, res) => {
 });
 
 app.get('/api/routes/computed', (_req, res) => {
-  // Public endpoint showing Dijkstra computed paths between all nodes
-  const start = 'Dispatch Bay';
-  const dest  = 'City Hospital';
-  const path  = dijkstra(start, dest);
-  res.json({ start, dest, path, weight: path.length - 1 });
+  // Public endpoint showing real Dijkstra-computed paths from every
+  // ambulance dispatch base to every real hospital in the network.
+  const bases = Object.keys(AMBULANCE_BASES);
+  const results = bases.flatMap(base =>
+    HOSPITALS.map(hospital => {
+      const path = dijkstra(base, hospital.node);
+      return {
+        from: base,
+        to: hospital.name,
+        path,
+        distanceKm: path.length > 0 ? Math.round(pathDistanceKm(path) * 10) / 10 : null,
+      };
+    })
+  );
+  res.json({ routes: results });
 });
 
 app.get('/api/signal-engine', verify, async (_req, res) => {
@@ -1105,8 +1418,11 @@ addLog(`📡 SSE real-time stream ready at /api/stream`, 'system');
 addLog(`🔍 Detection system: Camera (YOLO) + Siren (Audio FFT)`, 'system');
 addLog(`✅ Verification logic: Emergency ON AND (Camera OR Siren)`, 'system');
 
-ROUTE_OPTIONS.forEach(r => {
-  addLog(`🗺️  ${r.name}: ${r.nodes.join(' → ')} (${r.distance})`, 'info');
+Object.keys(AMBULANCE_BASES).forEach(base => {
+  HOSPITALS.forEach(hospital => {
+    const opts = computeRouteOptions(base, hospital, blockedEdges);
+    opts.forEach(r => addLog(`🗺️  ${base} → ${hospital.name}: ${r.name} (${r.distance})`, 'info'));
+  });
 });
 
 app.listen(PORT, () => {

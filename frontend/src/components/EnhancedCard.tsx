@@ -1,4 +1,5 @@
 import React from 'react';
+import { motion, useMotionValue, useTransform, useSpring } from 'framer-motion';
 
 interface EnhancedCardProps {
   children: React.ReactNode;
@@ -123,8 +124,31 @@ export const MetricCard: React.FC<MetricCardProps> = ({
   trendValue,
   subtitle
 }) => {
+  // Real Framer Motion 3D tilt: raw pointer position (0-1 across the card)
+  // feeds useTransform to map to a rotation range, smoothed through a
+  // spring so it settles instead of snapping - the textbook pattern for
+  // this effect, kept to a small ±5deg range for a dashboard's tone.
+  const px = useMotionValue(0.5);
+  const py = useMotionValue(0.5);
+  const rotateX = useSpring(useTransform(py, [0, 1], [5, -5]), { stiffness: 300, damping: 25, bounce: 0.05 });
+  const rotateY = useSpring(useTransform(px, [0, 1], [-5, 5]), { stiffness: 300, damping: 25, bounce: 0.05 });
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    px.set((e.clientX - rect.left) / rect.width);
+    py.set((e.clientY - rect.top) / rect.height);
+  };
+  const handleMouseLeave = () => { px.set(0.5); py.set(0.5); };
+
   return (
-    <div className="metric-card-enhanced">
+    <motion.div
+      className="metric-card-enhanced"
+      style={{ rotateX, rotateY, transformPerspective: 900 }}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+      whileHover={{ y: -6, scale: 1.02 }}
+      transition={{ type: 'spring', stiffness: 300, damping: 25, bounce: 0.05 }}
+    >
       <div style={{ 
         display: 'flex', 
         alignItems: 'flex-start', 
@@ -196,7 +220,7 @@ export const MetricCard: React.FC<MetricCardProps> = ({
           <span>{trendValue}</span>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 };
 

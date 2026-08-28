@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { Ambulance, ShieldAlert, Activity, ShieldCheck, Lock, User, Eye, EyeOff, ChevronRight, Zap, Shield, Wifi, Cpu, Layers, CheckCircle2 } from 'lucide-react';
 import { loginUser, authStore } from '../api';
 import { useAuth } from '../context/AuthContext';
@@ -7,10 +8,10 @@ import { useToast } from '../components/Toast';
 import type { AuthUser } from '../api';
 
 const ROLES = [
-  { key: 'driver',   label: 'Ambulance Driver',  icon: <Ambulance size={22} />,   color: '#3b82f6', hint: 'driver123',   desc: 'Activate emergency mode & manage routes' },
-  { key: 'police',   label: 'Traffic Police',     icon: <ShieldAlert size={22} />, color: '#f59e0b', hint: 'police123',   desc: 'Monitor signals & manual override control' },
-  { key: 'hospital', label: 'Hospital Staff',     icon: <Activity size={22} />,    color: '#10b981', hint: 'hospital123', desc: 'Track inbound ambulances & prep bays' },
-  { key: 'admin',    label: 'System Admin',       icon: <ShieldCheck size={22} />, color: '#8b5cf6', hint: 'admin123',    desc: 'Full system oversight & signal control engine' },
+  { key: 'driver',   label: 'Ambulance Driver',  icon: <Ambulance size={22} />,   color: '#5D7DA6', hint: 'driver123',   desc: 'Activate emergency mode & manage routes' },
+  { key: 'police',   label: 'Traffic Police',     icon: <ShieldAlert size={22} />, color: '#C89B5C', hint: 'police123',   desc: 'Monitor signals & manual override control' },
+  { key: 'hospital', label: 'Hospital Staff',     icon: <Activity size={22} />,    color: '#86AB97', hint: 'hospital123', desc: 'Track inbound ambulances & prep bays' },
+  { key: 'admin',    label: 'System Admin',       icon: <ShieldCheck size={22} />, color: '#8C7CB5', hint: 'admin123',    desc: 'Full system oversight & signal control engine' },
 ];
 
 const Login: React.FC = () => {
@@ -78,6 +79,38 @@ const Login: React.FC = () => {
       position: 'relative',
       overflow: 'hidden',
     }}>
+      {/* Enterprise security trust bar - explicit security signaling,
+          the clearest marker of an "enterprise-forward" login screen */}
+      <div style={{
+        position: 'fixed',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        zIndex: 50,
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: 28,
+        flexWrap: 'wrap',
+        padding: '12px 24px',
+        background: 'rgba(36, 31, 43, 0.92)',
+        backdropFilter: 'blur(12px)',
+        borderTop: '1px solid rgba(255,255,255,0.08)',
+        fontSize: '0.7rem',
+        color: 'rgba(255,255,255,0.65)',
+        letterSpacing: '0.3px',
+        fontFamily: 'var(--font-mono)',
+      }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Lock size={11} strokeWidth={2.5} /> Sessions authenticated via JWT + bcrypt
+        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <ShieldCheck size={11} strokeWidth={2.5} /> Role-based access control enforced server-side
+        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Activity size={11} strokeWidth={2.5} /> All system activity is logged
+        </span>
+      </div>
       {/* Animated Background Orbs */}
       <div style={{
         position: 'absolute',
@@ -85,7 +118,7 @@ const Login: React.FC = () => {
         height: 800,
         top: -400,
         right: -300,
-        background: 'radial-gradient(circle, rgba(59,130,246,0.2), transparent 70%)',
+        background: 'radial-gradient(circle, rgba(93,125,166,0.2), transparent 70%)',
         borderRadius: '50%',
         animation: 'float 25s ease-in-out infinite',
         filter: 'blur(60px)',
@@ -96,7 +129,7 @@ const Login: React.FC = () => {
         height: 600,
         bottom: -300,
         left: -200,
-        background: 'radial-gradient(circle, rgba(16,185,129,0.18), transparent 70%)',
+        background: 'radial-gradient(circle, rgba(134,171,151,0.18), transparent 70%)',
         borderRadius: '50%',
         animation: 'floatReverse 30s ease-in-out infinite',
         filter: 'blur(60px)',
@@ -108,7 +141,7 @@ const Login: React.FC = () => {
         top: '50%',
         left: '50%',
         transform: 'translate(-50%, -50%)',
-        background: 'radial-gradient(circle, rgba(139,92,246,0.12), transparent 70%)',
+        background: 'radial-gradient(circle, rgba(140,124,181,0.12), transparent 70%)',
         borderRadius: '50%',
         animation: 'pulse 20s ease-in-out infinite',
         filter: 'blur(80px)',
@@ -129,23 +162,25 @@ const Login: React.FC = () => {
               width: 72, 
               height: 72, 
               borderRadius: 22, 
-              background: 'linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%)', 
+              background: 'linear-gradient(135deg, #46617F 0%, #3A5269 100%)', 
               display: 'flex', 
               alignItems: 'center', 
               justifyContent: 'center', 
               fontSize: 36, 
-              boxShadow: '0 12px 40px rgba(37,99,235,0.45), 0 4px 12px rgba(37,99,235,0.3), inset 0 2px 4px rgba(255,255,255,0.3)',
+              boxShadow: '0 12px 40px rgba(70,97,127,0.45), 0 4px 12px rgba(70,97,127,0.3), inset 0 2px 4px rgba(255,255,255,0.3)',
               border: '3px solid rgba(255,255,255,0.4)',
               animation: 'float 6s ease-in-out infinite',
             }}>🚑</div>
             <div>
               <div style={{ 
-                fontSize: '4rem', 
-                fontWeight: 900, 
-                letterSpacing: '-3px', 
+                fontFamily: 'var(--font-display)',
+                fontSize: '4.25rem', 
+                fontWeight: 600, 
+                fontStyle: 'italic',
+                letterSpacing: '-1px', 
                 lineHeight: 1, 
-                textShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                background: 'linear-gradient(135deg, #2563EB, #22C55E)',
+                textShadow: '0 4px 12px rgba(90,60,40,0.08)',
+                background: 'linear-gradient(135deg, #46617F, #86AB97)',
                 WebkitBackgroundClip: 'text',
                 WebkitTextFillColor: 'transparent',
                 backgroundClip: 'text',
@@ -157,9 +192,10 @@ const Login: React.FC = () => {
 
           {/* Subtitle */}
           <div style={{ 
+            fontFamily: 'var(--font-sans)',
             fontSize: '0.875rem', 
             letterSpacing: '4px', 
-            color: '#64748B', 
+            color: '#5C5568', 
             textTransform: 'uppercase', 
             marginBottom: 28,
             fontWeight: 700,
@@ -183,25 +219,25 @@ const Login: React.FC = () => {
               gap: 8,
               padding: '8px 16px',
               borderRadius: 20,
-              background: 'linear-gradient(135deg, rgba(34,197,94,0.15) 0%, rgba(34,197,94,0.10) 100%)',
-              border: '1.5px solid rgba(34,197,94,0.3)',
+              background: 'linear-gradient(135deg, rgba(110,148,129,0.15) 0%, rgba(110,148,129,0.10) 100%)',
+              border: '1.5px solid rgba(110,148,129,0.3)',
               fontSize: '0.75rem',
               fontWeight: 600,
-              color: '#15803D',
+              color: '#557563',
               letterSpacing: '0.3px',
-              boxShadow: '0 4px 12px rgba(34,197,94,0.18), 0 2px 4px rgba(0,0,0,0.05)',
+              boxShadow: '0 4px 12px rgba(110,148,129,0.18), 0 2px 4px rgba(0,0,0,0.05)',
               transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
               cursor: 'default',
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.transform = 'translateY(-2px)';
-              e.currentTarget.style.boxShadow = '0 6px 16px rgba(34,197,94,0.25), 0 3px 6px rgba(0,0,0,0.08)';
+              e.currentTarget.style.boxShadow = '0 6px 16px rgba(110,148,129,0.25), 0 3px 6px rgba(0,0,0,0.08)';
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(34,197,94,0.18), 0 2px 4px rgba(0,0,0,0.05)';
+              e.currentTarget.style.boxShadow = '0 4px 12px rgba(110,148,129,0.18), 0 2px 4px rgba(0,0,0,0.05)';
             }}>
-              <Shield size={14} strokeWidth={2.5} style={{ color: '#16A34A' }} />
+              <Shield size={14} strokeWidth={2.5} style={{ color: '#6E9481' }} />
               JWT Auth Active
             </div>
 
@@ -212,25 +248,25 @@ const Login: React.FC = () => {
               gap: 8,
               padding: '8px 16px',
               borderRadius: 20,
-              background: 'linear-gradient(135deg, rgba(59,130,246,0.15) 0%, rgba(59,130,246,0.10) 100%)',
-              border: '1.5px solid rgba(59,130,246,0.3)',
+              background: 'linear-gradient(135deg, rgba(93,125,166,0.15) 0%, rgba(93,125,166,0.10) 100%)',
+              border: '1.5px solid rgba(93,125,166,0.3)',
               fontSize: '0.75rem',
               fontWeight: 600,
-              color: '#1D4ED8',
+              color: '#3A5269',
               letterSpacing: '0.3px',
-              boxShadow: '0 4px 12px rgba(59,130,246,0.18), 0 2px 4px rgba(0,0,0,0.05)',
+              boxShadow: '0 4px 12px rgba(93,125,166,0.18), 0 2px 4px rgba(0,0,0,0.05)',
               transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
               cursor: 'default',
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.transform = 'translateY(-2px)';
-              e.currentTarget.style.boxShadow = '0 6px 16px rgba(59,130,246,0.25), 0 3px 6px rgba(0,0,0,0.08)';
+              e.currentTarget.style.boxShadow = '0 6px 16px rgba(93,125,166,0.25), 0 3px 6px rgba(0,0,0,0.08)';
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(59,130,246,0.18), 0 2px 4px rgba(0,0,0,0.05)';
+              e.currentTarget.style.boxShadow = '0 4px 12px rgba(93,125,166,0.18), 0 2px 4px rgba(0,0,0,0.05)';
             }}>
-              <Zap size={14} strokeWidth={2.5} style={{ color: '#2563EB' }} />
+              <Zap size={14} strokeWidth={2.5} style={{ color: '#46617F' }} />
               Dijkstra Routing
             </div>
 
@@ -241,25 +277,25 @@ const Login: React.FC = () => {
               gap: 8,
               padding: '8px 16px',
               borderRadius: 20,
-              background: 'linear-gradient(135deg, rgba(245,158,11,0.15) 0%, rgba(245,158,11,0.10) 100%)',
-              border: '1.5px solid rgba(245,158,11,0.3)',
+              background: 'linear-gradient(135deg, rgba(200,155,92,0.15) 0%, rgba(200,155,92,0.10) 100%)',
+              border: '1.5px solid rgba(200,155,92,0.3)',
               fontSize: '0.75rem',
               fontWeight: 600,
-              color: '#B45309',
+              color: '#8A6835',
               letterSpacing: '0.3px',
-              boxShadow: '0 4px 12px rgba(245,158,11,0.18), 0 2px 4px rgba(0,0,0,0.05)',
+              boxShadow: '0 4px 12px rgba(200,155,92,0.18), 0 2px 4px rgba(0,0,0,0.05)',
               transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
               cursor: 'default',
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.transform = 'translateY(-2px)';
-              e.currentTarget.style.boxShadow = '0 6px 16px rgba(245,158,11,0.25), 0 3px 6px rgba(0,0,0,0.08)';
+              e.currentTarget.style.boxShadow = '0 6px 16px rgba(200,155,92,0.25), 0 3px 6px rgba(0,0,0,0.08)';
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(245,158,11,0.18), 0 2px 4px rgba(0,0,0,0.05)';
+              e.currentTarget.style.boxShadow = '0 4px 12px rgba(200,155,92,0.18), 0 2px 4px rgba(0,0,0,0.05)';
             }}>
-              <Wifi size={14} strokeWidth={2.5} style={{ color: '#D97706' }} />
+              <Wifi size={14} strokeWidth={2.5} style={{ color: '#A67D42' }} />
               Real-time SSE
             </div>
 
@@ -270,25 +306,25 @@ const Login: React.FC = () => {
               gap: 8,
               padding: '8px 16px',
               borderRadius: 20,
-              background: 'linear-gradient(135deg, rgba(139,92,246,0.15) 0%, rgba(139,92,246,0.10) 100%)',
-              border: '1.5px solid rgba(139,92,246,0.3)',
+              background: 'linear-gradient(135deg, rgba(140,124,181,0.15) 0%, rgba(140,124,181,0.10) 100%)',
+              border: '1.5px solid rgba(140,124,181,0.3)',
               fontSize: '0.75rem',
               fontWeight: 600,
-              color: '#6D28D9',
+              color: '#6F6096',
               letterSpacing: '0.3px',
-              boxShadow: '0 4px 12px rgba(139,92,246,0.18), 0 2px 4px rgba(0,0,0,0.05)',
+              boxShadow: '0 4px 12px rgba(140,124,181,0.18), 0 2px 4px rgba(0,0,0,0.05)',
               transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
               cursor: 'default',
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.transform = 'translateY(-2px)';
-              e.currentTarget.style.boxShadow = '0 6px 16px rgba(139,92,246,0.25), 0 3px 6px rgba(0,0,0,0.08)';
+              e.currentTarget.style.boxShadow = '0 6px 16px rgba(140,124,181,0.25), 0 3px 6px rgba(0,0,0,0.08)';
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(139,92,246,0.18), 0 2px 4px rgba(0,0,0,0.05)';
+              e.currentTarget.style.boxShadow = '0 4px 12px rgba(140,124,181,0.18), 0 2px 4px rgba(0,0,0,0.05)';
             }}>
-              <Cpu size={14} strokeWidth={2.5} style={{ color: '#8B5CF6' }} />
+              <Cpu size={14} strokeWidth={2.5} style={{ color: '#8C7CB5' }} />
               Signal Control Engine
             </div>
           </div>
@@ -305,20 +341,23 @@ const Login: React.FC = () => {
               textTransform: 'uppercase', 
               marginBottom: 8, 
               paddingLeft: 6, 
-              color: '#475569',
+              color: '#5C5568',
               lineHeight: 1.6,
               display: 'flex',
               alignItems: 'center',
               gap: 8,
             }}>
-              <Layers size={16} strokeWidth={2.5} style={{ color: '#3B82F6' }} />
+              <Layers size={16} strokeWidth={2.5} style={{ color: '#5D7DA6' }} />
               Access Modules
             </div>
             {ROLES.map((role, index) => (
-              <button key={role.key}
+              <motion.button key={role.key}
                 onClick={() => handleRoleClick(role.key)}
                 disabled={loading}
                 className="metric-card-enhanced"
+                whileHover={{ y: -6, scale: 1.03 }}
+                whileTap={{ scale: 0.98 }}
+                transition={{ type: 'spring', stiffness: 320, damping: 24, bounce: 0.05 }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 18, padding: '20px',
                   background: selectedRole === role.key 
@@ -326,32 +365,10 @@ const Login: React.FC = () => {
                     : undefined,
                   border: `2px solid ${selectedRole === role.key ? role.color + '60' : 'rgba(255,255,255,0.65)'}`,
                   cursor: 'pointer', textAlign: 'left',
-                  transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
                   boxShadow: selectedRole === role.key 
                     ? `0 12px 40px ${role.color}25, 0 4px 16px ${role.color}18` 
                     : undefined,
-                  transform: selectedRole === role.key ? 'translateY(-4px) scale(1.02)' : 'translateY(0) scale(1)',
                   animation: `fadeInUp 0.6s cubic-bezier(0.4, 0, 0.2, 1) ${0.2 + index * 0.1}s both`,
-                }}
-                onMouseEnter={(e) => {
-                  if (selectedRole !== role.key) {
-                    e.currentTarget.style.transform = 'translateY(-6px) scale(1.03)';
-                    e.currentTarget.style.boxShadow = `0 16px 48px ${role.color}20, 0 6px 20px rgba(0,0,0,0.1)`;
-                    e.currentTarget.style.borderColor = role.color + '40';
-                  } else {
-                    e.currentTarget.style.transform = 'translateY(-5px) scale(1.03)';
-                    e.currentTarget.style.boxShadow = `0 20px 60px ${role.color}30, 0 8px 24px ${role.color}20`;
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (selectedRole !== role.key) {
-                    e.currentTarget.style.transform = 'translateY(0) scale(1)';
-                    e.currentTarget.style.boxShadow = '';
-                    e.currentTarget.style.borderColor = 'rgba(255,255,255,0.65)';
-                  } else {
-                    e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
-                    e.currentTarget.style.boxShadow = `0 12px 40px ${role.color}25, 0 4px 16px ${role.color}18`;
-                  }
                 }}
               >
                 {/* Subtle gradient overlay for active state */}
@@ -386,7 +403,7 @@ const Login: React.FC = () => {
                   <div style={{ 
                     fontWeight: 800, 
                     fontSize: '1rem', 
-                    color: selectedRole === role.key ? role.color : '#1E293B',
+                    color: selectedRole === role.key ? role.color : '#241F2B',
                     marginBottom: 6,
                     transition: 'color 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
                     letterSpacing: '-0.3px',
@@ -394,7 +411,7 @@ const Login: React.FC = () => {
                   }}>{role.label}</div>
                   <div style={{ 
                     fontSize: '0.75rem', 
-                    color: '#64748B', 
+                    color: '#5C5568', 
                     lineHeight: 1.6,
                     letterSpacing: '0.1px',
                     transition: 'color 0.3s ease',
@@ -411,7 +428,7 @@ const Login: React.FC = () => {
                     }} 
                   />
                 )}
-              </button>
+              </motion.button>
             ))}
             
             {/* System Architecture */}
@@ -436,13 +453,13 @@ const Login: React.FC = () => {
                 letterSpacing: '2px', 
                 textTransform: 'uppercase', 
                 marginBottom: 16, 
-                color: '#475569',
+                color: '#5C5568',
                 lineHeight: 1.6,
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
               }}>
-                <Cpu size={16} strokeWidth={2.5} style={{ color: '#8B5CF6' }} />
+                <Cpu size={16} strokeWidth={2.5} style={{ color: '#8C7CB5' }} />
                 System Stack
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px' }}>
@@ -457,8 +474,8 @@ const Login: React.FC = () => {
                   ['Backend', 'Node + TS'],
                 ].map(([k, v]) => (
                   <div key={k} style={{ padding: '4px 0', borderBottom: '1px solid rgba(0,0,0,0.05)', display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                    <span style={{ color: '#64748B', fontSize: '0.7rem', letterSpacing: '0.2px', lineHeight: 1.6 }}>{k}</span>
-                    <span className="mono" style={{ color: '#2C3E50', fontSize: '0.7rem', fontWeight: 500, letterSpacing: '0.1px' }}>{v}</span>
+                    <span style={{ color: '#5C5568', fontSize: '0.7rem', letterSpacing: '0.2px', lineHeight: 1.6 }}>{k}</span>
+                    <span className="mono" style={{ color: '#241F2B', fontSize: '0.7rem', fontWeight: 500, letterSpacing: '0.1px' }}>{v}</span>
                   </div>
                 ))}
               </div>
@@ -495,13 +512,13 @@ const Login: React.FC = () => {
                     height: 120,
                     margin: '0 auto 24px',
                     borderRadius: '50%',
-                    background: 'linear-gradient(135deg, rgba(59,130,246,0.12) 0%, rgba(139,92,246,0.12) 100%)',
-                    border: '2px solid rgba(59,130,246,0.2)',
+                    background: 'linear-gradient(135deg, rgba(93,125,166,0.12) 0%, rgba(140,124,181,0.12) 100%)',
+                    border: '2px solid rgba(93,125,166,0.2)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     position: 'relative',
-                    boxShadow: '0 8px 24px rgba(59,130,246,0.15), inset 0 2px 4px rgba(255,255,255,0.5)',
+                    boxShadow: '0 8px 24px rgba(93,125,166,0.15), inset 0 2px 4px rgba(255,255,255,0.5)',
                     animation: 'scaleIn 0.6s cubic-bezier(0.4, 0, 0.2, 1) 0.2s both',
                   }}>
                     {/* Inner glow circle */}
@@ -514,7 +531,7 @@ const Login: React.FC = () => {
                       alignItems: 'center',
                       justifyContent: 'center',
                     }}>
-                      <Layers size={48} strokeWidth={1.5} style={{ color: '#3B82F6' }} />
+                      <Layers size={48} strokeWidth={1.5} style={{ color: '#5D7DA6' }} />
                     </div>
                     {/* Floating dots decoration */}
                     <div style={{
@@ -524,8 +541,8 @@ const Login: React.FC = () => {
                       width: 8,
                       height: 8,
                       borderRadius: '50%',
-                      background: '#3B82F6',
-                      boxShadow: '0 0 0 4px rgba(59,130,246,0.2)',
+                      background: '#5D7DA6',
+                      boxShadow: '0 0 0 4px rgba(93,125,166,0.2)',
                       animation: 'float 3s ease-in-out infinite',
                     }} />
                     <div style={{
@@ -535,8 +552,8 @@ const Login: React.FC = () => {
                       width: 6,
                       height: 6,
                       borderRadius: '50%',
-                      background: '#8B5CF6',
-                      boxShadow: '0 0 0 3px rgba(139,92,246,0.2)',
+                      background: '#8C7CB5',
+                      boxShadow: '0 0 0 3px rgba(140,124,181,0.2)',
                       animation: 'float 3s ease-in-out infinite 1s',
                     }} />
                   </div>
@@ -544,7 +561,7 @@ const Login: React.FC = () => {
                   {/* Title */}
                   <div style={{ 
                     fontWeight: 700, 
-                    color: '#1E293B', 
+                    color: '#241F2B', 
                     fontSize: '1.35rem', 
                     letterSpacing: '-0.5px', 
                     lineHeight: 1.3,
@@ -556,7 +573,7 @@ const Login: React.FC = () => {
                   {/* Description */}
                   <div style={{ 
                     fontSize: '0.875rem', 
-                    color: '#64748B', 
+                    color: '#5C5568', 
                     lineHeight: 1.6, 
                     letterSpacing: '0.1px',
                     marginBottom: 24,
@@ -571,49 +588,49 @@ const Login: React.FC = () => {
                     <div style={{
                       padding: '6px 14px',
                       borderRadius: 16,
-                      background: 'rgba(34,197,94,0.1)',
-                      border: '1px solid rgba(34,197,94,0.2)',
+                      background: 'rgba(110,148,129,0.1)',
+                      border: '1px solid rgba(110,148,129,0.2)',
                       fontSize: '0.7rem',
                       fontWeight: 600,
-                      color: '#15803D',
+                      color: '#557563',
                       letterSpacing: '0.3px',
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: 6,
                     }}>
-                      <Shield size={12} strokeWidth={2.5} style={{ color: '#16A34A' }} />
+                      <Shield size={12} strokeWidth={2.5} style={{ color: '#6E9481' }} />
                       Secure JWT
                     </div>
                     <div style={{
                       padding: '6px 14px',
                       borderRadius: 16,
-                      background: 'rgba(59,130,246,0.1)',
-                      border: '1px solid rgba(59,130,246,0.2)',
+                      background: 'rgba(93,125,166,0.1)',
+                      border: '1px solid rgba(93,125,166,0.2)',
                       fontSize: '0.7rem',
                       fontWeight: 600,
-                      color: '#1D4ED8',
+                      color: '#3A5269',
                       letterSpacing: '0.3px',
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: 6,
                     }}>
-                      <Zap size={12} strokeWidth={2.5} style={{ color: '#2563EB' }} />
+                      <Zap size={12} strokeWidth={2.5} style={{ color: '#46617F' }} />
                       Fast Login
                     </div>
                     <div style={{
                       padding: '6px 14px',
                       borderRadius: 16,
-                      background: 'rgba(139,92,246,0.1)',
-                      border: '1px solid rgba(139,92,246,0.2)',
+                      background: 'rgba(140,124,181,0.1)',
+                      border: '1px solid rgba(140,124,181,0.2)',
                       fontSize: '0.7rem',
                       fontWeight: 600,
-                      color: '#6D28D9',
+                      color: '#6F6096',
                       letterSpacing: '0.3px',
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: 6,
                     }}>
-                      <CheckCircle2 size={12} strokeWidth={2.5} style={{ color: '#8B5CF6' }} />
+                      <CheckCircle2 size={12} strokeWidth={2.5} style={{ color: '#8C7CB5' }} />
                       bcrypt Hash
                     </div>
                   </div>
@@ -626,28 +643,28 @@ const Login: React.FC = () => {
                     </div>
                     <div>
                       <div style={{ fontWeight: 700, color: selectedDef?.color, fontSize: '1.1rem', letterSpacing: '-0.3px', lineHeight: 1.3 }}>{selectedDef?.label}</div>
-                      <div style={{ fontSize: '0.75rem', color: '#64748B', marginTop: 2, letterSpacing: '0.2px', lineHeight: 1.5 }}>JWT-protected endpoint · bcrypt verified</div>
+                      <div style={{ fontSize: '0.75rem', color: '#5C5568', marginTop: 2, letterSpacing: '0.2px', lineHeight: 1.5 }}>JWT-protected endpoint · bcrypt verified</div>
                     </div>
                   </div>
 
                   {error && (
-                    <div style={{ padding: '12px 16px', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 12, fontSize: '0.82rem', color: 'var(--c-red)', marginBottom: 16, lineHeight: 1.5, letterSpacing: '0.1px' }}>
+                    <div style={{ padding: '12px 16px', background: 'rgba(255,59,92,0.12)', border: '1px solid rgba(255,59,92,0.3)', borderRadius: 12, fontSize: '0.82rem', color: 'var(--c-red)', marginBottom: 16, lineHeight: 1.5, letterSpacing: '0.1px' }}>
                       ⚠️ {error}
                     </div>
                   )}
 
                   <form onSubmit={handleLogin} style={{ animation: 'fadeInUp 0.5s cubic-bezier(0.4, 0, 0.2, 1) 0.1s both' }}>
                     <div className="form-group" style={{ marginBottom: 16 }}>
-                      <label style={{ fontSize: '0.75rem', fontWeight: 600, letterSpacing: '0.5px', color: '#64748B', marginBottom: 8, lineHeight: 1.6, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <User size={14} strokeWidth={2.5} style={{ color: '#64748B' }} />
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600, letterSpacing: '0.5px', color: '#5C5568', marginBottom: 8, lineHeight: 1.6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <User size={14} strokeWidth={2.5} style={{ color: '#5C5568' }} />
                         Username (Role ID)
                       </label>
                       <input className="form-input" value={selectedRole} readOnly style={{ opacity: 0.55 }} />
                     </div>
 
                     <div className="form-group" style={{ marginBottom: 16 }}>
-                      <label style={{ fontSize: '0.75rem', fontWeight: 600, letterSpacing: '0.5px', color: '#64748B', marginBottom: 8, lineHeight: 1.6, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <Lock size={14} strokeWidth={2.5} style={{ color: '#64748B' }} />
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600, letterSpacing: '0.5px', color: '#5C5568', marginBottom: 8, lineHeight: 1.6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Lock size={14} strokeWidth={2.5} style={{ color: '#5C5568' }} />
                         Password
                       </label>
                       <div style={{ position: 'relative' }}>
@@ -668,17 +685,17 @@ const Login: React.FC = () => {
                           background: 'none', 
                           border: 'none', 
                           cursor: 'pointer', 
-                          color: '#64748B',
+                          color: '#5C5568',
                           transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
                           padding: '4px',
                           borderRadius: '6px',
                         }}
                         onMouseEnter={(e) => {
-                          e.currentTarget.style.color = '#2C3E50';
+                          e.currentTarget.style.color = '#241F2B';
                           e.currentTarget.style.background = 'rgba(0,0,0,0.05)';
                         }}
                         onMouseLeave={(e) => {
-                          e.currentTarget.style.color = '#64748B';
+                          e.currentTarget.style.color = '#5C5568';
                           e.currentTarget.style.background = 'none';
                         }}>
                           {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -726,8 +743,8 @@ const Login: React.FC = () => {
                     </button>
                   </form>
 
-                  <div style={{ textAlign: 'center', fontSize: '0.72rem', color: '#94A3B8', marginTop: 16, paddingTop: 16, borderTop: '1px solid rgba(0,0,0,0.08)', lineHeight: 1.6, letterSpacing: '0.2px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, animation: 'fadeIn 0.5s ease 0.3s both' }}>
-                    <Shield size={14} strokeWidth={2} style={{ color: '#94A3B8' }} />
+                  <div style={{ textAlign: 'center', fontSize: '0.72rem', color: '#837C8E', marginTop: 16, paddingTop: 16, borderTop: '1px solid rgba(0,0,0,0.08)', lineHeight: 1.6, letterSpacing: '0.2px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, animation: 'fadeIn 0.5s ease 0.3s both' }}>
+                    <Shield size={14} strokeWidth={2} style={{ color: '#837C8E' }} />
                     bcrypt password hashing · 8hr JWT session token
                   </div>
                 </div>

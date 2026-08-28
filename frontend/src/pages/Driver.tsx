@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Power, Navigation, Video, Mic2, CheckCircle2, XCircle, AlertTriangle, Route, RefreshCw, Terminal, Activity, Gauge, MapPin, Clock, Fuel, Thermometer } from 'lucide-react';
+import { Power, Navigation, Video, Mic2, CheckCircle2, XCircle, AlertTriangle, Route, RefreshCw, Terminal, Activity, Gauge, MapPin, Clock, Fuel, Thermometer, Building2 } from 'lucide-react';
 import { useSSE } from '../hooks/usePoll';
-import { startEmergency, stopEmergency, fetchRoutes, toggleCameraDetection, toggleSirenDetection, detectCameraReal, detectSirenReal } from '../api';
+import { startEmergency, stopEmergency, fetchRoutes, fetchHospitals, toggleCameraDetection, toggleSirenDetection, detectCameraReal, detectSirenReal } from '../api';
 import type { RealDetectionResult } from '../api';
-import type { RouteOption, AmbulanceSession } from '../api';
+import type { RouteOption, AmbulanceSession, Hospital } from '../api';
 import { useAuth } from '../context/AuthContext';
 import Nav from '../components/Nav';
 import TrafficLight from '../components/TrafficLight';
@@ -12,6 +12,10 @@ import SirenWaveform from '../components/SirenWaveform';
 import { useToast } from '../components/Toast';
 import { LiveBadge, AnimatedProgress, StatusPulse, AnimatedCounter } from '../components/LiveIndicators';
 import { GlassCard } from '../components/EnhancedCard';
+import Tooltip from '../components/Tooltip';
+import { useStaircaseLoading, DashboardSkeleton } from '../components/SkeletonLoader';
+import VitalsMonitor from '../components/VitalsMonitor';
+import CCTVFeedSimulator from '../components/CCTVFeedSimulator';
 
 const intakeInputStyle: React.CSSProperties = {
   padding: '8px 12px',
@@ -33,6 +37,9 @@ const Driver: React.FC = () => {
   const [routesLoading, setRoutesLoading] = useState(true);
   const [routesError, setRoutesError]     = useState<string | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState('R1');
+  const [hospitals, setHospitals]         = useState<Hospital[]>([]);
+  const [hospitalsLoading, setHospitalsLoading] = useState(true);
+  const [selectedHospitalId, setSelectedHospitalId] = useState<string>('');
   const [patientCondition, setPatientCondition] = useState('');
   const [patientSeverity, setPatientSeverity] = useState<'critical' | 'serious' | 'stable'>('serious');
   const [patientDepartment, setPatientDepartment] = useState('');
@@ -49,28 +56,47 @@ const Driver: React.FC = () => {
   const prevGPSRef = useRef<[number, number] | null>(null);
   const prevTimeRef = useRef<number>(Date.now());
 
-  // Fetch available routes from backend (Dijkstra-computed)
-  useEffect(() => { 
+  // Fetch real hospitals (Section 6: genuine hospital selection), default
+  // to the nearest one from this driver's dispatch base, then load routes
+  // for that specific hospital.
+  useEffect(() => {
+    const loadHospitals = async () => {
+      setHospitalsLoading(true);
+      try {
+        const data = await fetchHospitals();
+        setHospitals(data);
+        const nearest = data.find(h => h.reachable) || data[0];
+        if (nearest) setSelectedHospitalId(nearest.id);
+      } catch (error: any) {
+        console.error('Failed to load hospitals:', error);
+        toast('Failed to load hospitals list', 'error');
+      } finally {
+        setHospitalsLoading(false);
+      }
+    };
+    loadHospitals();
+  }, []);
+
+  // Reload routes whenever the selected hospital changes
+  useEffect(() => {
+    if (!selectedHospitalId) return;
     const loadRoutes = async () => {
       setRoutesLoading(true);
       setRoutesError(null);
       try {
-        const data = await fetchRoutes();
+        const data = await fetchRoutes(selectedHospitalId);
         setRoutes(data);
+        setSelectedRouteId(data[0]?.id || 'R1');
       } catch (error: any) {
         console.error('Failed to load routes:', error);
         setRoutesError(error.message || 'Failed to load routes');
-        toast('Failed to load routes. Using defaults.', 'error');
-        // Fallback to default routes
-        setRoutes([
-          { id: 'R1', name: 'Optimal Route', nodes: ['Dispatch Bay', 'City Hospital'], distance: '4.2 km', estimatedTime: 8 }
-        ]);
+        setRoutes([]);
       } finally {
         setRoutesLoading(false);
       }
     };
     loadRoutes();
-  }, []);
+  }, [selectedHospitalId]);
 
   // Find MY session (matching this driver's user ID)
   const mySession: AmbulanceSession | undefined = state?.sessions.find(
@@ -165,19 +191,23 @@ const Driver: React.FC = () => {
   };
 
   const handleToggle = async () => {
+    if (!mySession && !selectedHospitalId) {
+      toast('Select a destination hospital first', 'error');
+      return;
+    }
     setLoading(true);
     try {
       if (mySession) {
         await stopEmergency(mySession.rid);
         toast(`Emergency ${mySession.rid} stopped`, 'warning');
       } else {
-        const res = await startEmergency(selectedRouteId, {
+        const res = await startEmergency(selectedHospitalId, selectedRouteId, {
           condition: patientCondition || 'Not specified',
           severity: patientSeverity,
           requiredDepartment: patientDepartment || 'General Emergency',
           notes: patientNotes,
         });
-        toast(`Emergency activated — RID: ${res.rid}`, 'error');
+        toast(`Emergency activated — RID: ${res.rid} → ${res.hospital.name}`, 'error');
         setShowRouteSelector(false);
       }
     } catch (error: any) {
@@ -231,14 +261,18 @@ const Driver: React.FC = () => {
 
       // Calculate distance remaining
       const GPS_COORDS: Record<string, [number, number]> = {
-        'Dispatch Bay': [28.6139, 77.2090],
-        'Junction A': [28.6180, 77.2120],
-        'Junction B': [28.6220, 77.2150],
-        'Central Junction': [28.6250, 77.2180],
-        'Medical Zone': [28.6280, 77.2200],
-        'Ring Road': [28.6160, 77.2050],
-        'North Gate': [28.6300, 77.2100],
-        'City Hospital': [28.6320, 77.2220],
+        'Indiranagar Metro (Dispatch)': [12.9786, 77.6388],
+        '100 Feet Road Junction': [12.9719, 77.6412],
+        'Domlur Flyover': [12.9604, 77.6417],
+        'Kodihalli Junction': [12.9601, 77.6472],
+        'Marathahalli (ORR)': [12.9562, 77.7019],
+        'Manipal Hospital': [12.9588, 77.6491],
+        'Halasuru (Ulsoor)': [12.9757, 77.6263],
+        'Trinity Circle': [12.9730, 77.6170],
+        'Victoria Hospital': [12.9634, 77.5738],
+        'Adugodi': [12.9435, 77.6091],
+        'Silk Board Junction': [12.9170, 77.6220],
+        "St. John's Medical College Hospital": [12.9293, 77.6201],
       };
 
       let totalDistance = 0;
@@ -303,9 +337,20 @@ const Driver: React.FC = () => {
   // Driver-relevant logs
   const myLogs = logs.filter(l => !l.sessionRID || l.sessionRID === mySession?.rid).slice(0, 20);
 
+  const loadStage = useStaircaseLoading(!state);
+
+  if (!state) return (
+    <>
+      <Nav roleName="Ambulance Driver" roleColor="#5D7DA6" connected={connected} />
+      {loadStage === 'skeleton' ? <DashboardSkeleton /> : loadStage === 'spinner' ? (
+        <div className="loading-screen"><div className="spinner" /><span>Connecting to AERIS stream...</span></div>
+      ) : null}
+    </>
+  );
+
   return (
     <>
-      <Nav roleName="Ambulance Driver" roleColor="#3b82f6" connected={connected} />
+      <Nav roleName="Ambulance Driver" roleColor="#5D7DA6" connected={connected} />
       <div className="container animate-fade-up">
 
         {/* SSE Connection Error Banner */}
@@ -335,13 +380,13 @@ const Driver: React.FC = () => {
             <p className="page-subtitle">
               {mySession
                 ? <>Active Session: <span className="mono text-blue font-semibold">{mySession.rid}</span> · {mySession.routeName}</>
-                : 'No active session · Select route and activate emergency mode'}
+                : 'No active session · Select a hospital and activate emergency mode'}
             </p>
           </div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
             {!isEmergency && (
               <button className="btn btn-ghost" onClick={() => setShowRouteSelector(s => !s)} style={{ gap: 6 }}>
-                <Route size={16} /> {routes.find(r => r.id === selectedRouteId)?.name || 'Select Route'}
+                <Building2 size={16} /> {hospitals.find(h => h.id === selectedHospitalId)?.name || 'Select Hospital'}
               </button>
             )}
             <button
@@ -356,9 +401,59 @@ const Driver: React.FC = () => {
           </div>
         </div>
 
+        {/* ── Hospital Selector (Section 6: real hospital choice) ── */}
+        {showRouteSelector && !isEmergency && (
+          <div className="card mb-4 animate-fade-in" style={{ borderColor: 'rgba(134,171,151,0.2)' }}>
+            <div className="section-title"><Building2 size={14} /> Select Destination Hospital</div>
+            {hospitalsLoading ? (
+              <div className="text-center py-4">
+                <div className="spinner" style={{ width: 24, height: 24, margin: '0 auto 8px' }} />
+                <div className="text-xs text-muted">Loading real hospitals...</div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {hospitals.map(h => (
+                  <div key={h.id} onClick={() => h.reachable && setSelectedHospitalId(h.id)} style={{
+                    display: 'flex', alignItems: 'center', gap: 14, padding: '12px 14px',
+                    borderRadius: 10, cursor: h.reachable ? 'pointer' : 'not-allowed', transition: 'all 0.2s',
+                    opacity: h.reachable ? 1 : 0.4,
+                    background: selectedHospitalId === h.id ? 'rgba(134,171,151,0.1)' : 'rgba(255,255,255,0.02)',
+                    border: `1px solid ${selectedHospitalId === h.id ? 'rgba(134,171,151,0.4)' : 'rgba(255,255,255,0.05)'}`,
+                  }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 10, background: selectedHospitalId === h.id ? 'rgba(134,171,151,0.2)' : 'rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <Building2 size={18} color={selectedHospitalId === h.id ? '#86AB97' : '#4a5878'} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="font-semibold text-sm">{h.name}</div>
+                      <div className="text-xs text-muted">{h.address}</div>
+                      <div className="text-xs text-quiet mt-1">{h.departments.join(' · ')}</div>
+                      <div className="text-xs mt-1" style={{
+                        color: h.availableBeds === 0 ? 'var(--red-bright)' : h.availableBeds <= h.totalBeds * 0.15 ? 'var(--orange)' : 'var(--green)',
+                        fontWeight: 600,
+                      }}>
+                        {h.availableBeds === 0 ? '⚠ No beds available' : `🛏 ${h.availableBeds}/${h.totalBeds} beds available`}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      {h.reachable ? (
+                        <>
+                          <div className="font-bold" style={{ color: '#86AB97', fontSize: '0.9rem' }}>{h.distanceKm} km</div>
+                          <div className="text-xs text-quiet">~{h.estimatedMinutes} min</div>
+                        </>
+                      ) : (
+                        <div className="text-xs text-red">Unreachable</div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── Route Selector ── */}
         {showRouteSelector && !isEmergency && (
-          <div className="card mb-4 animate-fade-in" style={{ borderColor: 'rgba(59,130,246,0.2)' }}>
+          <div className="card mb-4 animate-fade-in" style={{ borderColor: 'rgba(93,125,166,0.2)' }}>
             <div className="section-title"><Route size={14} /> Route Selection — Dijkstra Pre-Computed Paths</div>
             {routesLoading ? (
               <div className="text-center py-4">
@@ -376,10 +471,10 @@ const Driver: React.FC = () => {
                   <div key={r.id} onClick={() => setSelectedRouteId(r.id)} style={{
                     display: 'flex', alignItems: 'center', gap: 14, padding: '12px 14px',
                     borderRadius: 10, cursor: 'pointer', transition: 'all 0.2s',
-                    background: selectedRouteId === r.id ? 'rgba(59,130,246,0.1)' : 'rgba(255,255,255,0.02)',
-                    border: `1px solid ${selectedRouteId === r.id ? 'rgba(59,130,246,0.4)' : 'rgba(255,255,255,0.05)'}`,
+                    background: selectedRouteId === r.id ? 'rgba(93,125,166,0.1)' : 'rgba(255,255,255,0.02)',
+                    border: `1px solid ${selectedRouteId === r.id ? 'rgba(93,125,166,0.4)' : 'rgba(255,255,255,0.05)'}`,
                   }}>
-                    <div style={{ width: 36, height: 36, borderRadius: 8, background: selectedRouteId === r.id ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.8rem', color: selectedRouteId === r.id ? '#3b82f6' : '#4a5878' }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 8, background: selectedRouteId === r.id ? 'rgba(93,125,166,0.2)' : 'rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.8rem', color: selectedRouteId === r.id ? '#5D7DA6' : '#4a5878' }}>
                       {r.id}
                     </div>
                     <div style={{ flex: 1 }}>
@@ -453,21 +548,22 @@ const Driver: React.FC = () => {
               </div>
             ) : null
           }
-          glowColor="rgba(59,130,246,0.2)"
+          glowColor="rgba(93,125,166,0.2)"
         >
           <InteractiveMap 
             sessions={state?.sessions || []} 
             signals={state?.signals.map(s => {
               // Map signal junctions to GPS coordinates
               const junctionCoords: Record<string, [number, number]> = {
-                'Junction A': [28.6180, 77.2120],
-                'Junction B': [28.6220, 77.2150],
-                'Central Junction': [28.6250, 77.2180],
-                'Medical Zone': [28.6280, 77.2200],
-                'Ring Road': [28.6160, 77.2050],
-                'North Gate': [28.6300, 77.2100],
+                '100 Feet Road Junction': [12.9719, 77.6412],
+                'Domlur Flyover': [12.9604, 77.6417],
+                'Kodihalli Junction': [12.9601, 77.6472],
+                'Marathahalli (ORR)': [12.9562, 77.7019],
+                'Halasuru (Ulsoor)': [12.9757, 77.6263],
+                'Trinity Circle': [12.9730, 77.6170],
+                'Adugodi': [12.9435, 77.6091],
               };
-              const [lat, lng] = junctionCoords[s.junction] || [28.6139, 77.2090];
+              const [lat, lng] = junctionCoords[s.junction] || [12.9786, 77.6388];
               return { id: s.id, name: s.name, color: s.color, lat, lng };
             }) || []} 
             centerOnAmbulance={isEmergency}
@@ -488,7 +584,7 @@ const Driver: React.FC = () => {
               title="Live Vehicle Metrics"
               subtitle="Real-time telemetry and navigation data"
               badge={isEmergency ? <LiveBadge variant="red" /> : null}
-              glowColor="rgba(59,130,246,0.15)"
+              glowColor="rgba(93,125,166,0.15)"
             >
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem' }}>
                 {/* Speed */}
@@ -519,7 +615,7 @@ const Driver: React.FC = () => {
                   padding: '1.25rem', 
                   borderRadius: 12, 
                   background: 'rgba(255,255,255,0.02)',
-                  border: '2px solid rgba(59,130,246,0.2)'
+                  border: '2px solid rgba(93,125,166,0.2)'
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                     <MapPin size={18} color="var(--blue)" />
@@ -627,6 +723,24 @@ const Driver: React.FC = () => {
               </div>
             </GlassCard>
 
+            {/* Live Patient Vitals - Section 23 of the original spec:
+                "Advanced patient vital integration", previously just a
+                future-enhancements bullet point, never built. */}
+            {mySession && (
+              <div className="card">
+                <div className="card-header">
+                  <div className="card-title">
+                    <div className="card-title-icon"><Tooltip label="Simulated live vitals, updating every second"><span>❤️</span></Tooltip></div>
+                    Patient Vitals
+                  </div>
+                  <span className="text-xs text-quiet" style={{ textTransform: 'capitalize' }}>{mySession.patient.severity}</span>
+                </div>
+                <div className="card-body">
+                  <VitalsMonitor vitals={mySession.vitals} severity={mySession.patient.severity} />
+                </div>
+              </div>
+            )}
+
             {/* Dual Detection Panel */}
             <div className="card">
               <div className="card-header">
@@ -634,9 +748,11 @@ const Driver: React.FC = () => {
                   <div className="card-title-icon"><Video size={16} /></div>
                   Dual Verification System
                 </div>
-                <button onClick={toggleCameraDetect} disabled={!mySession || polling} className="btn btn-ghost btn-sm">
-                  <RefreshCw size={12} className={polling ? 'spin' : ''} /> Toggle
-                </button>
+                <Tooltip label="Simulate a new camera detection reading">
+                  <button onClick={toggleCameraDetect} disabled={!mySession || polling} className="btn btn-ghost btn-sm">
+                    <RefreshCw size={12} className={polling ? 'spin' : ''} /> Toggle
+                  </button>
+                </Tooltip>
               </div>
 
               <div className="card-body">
@@ -685,6 +801,24 @@ const Driver: React.FC = () => {
                     </span>
                   )}
                 </div>
+
+                {/* CCTV feed simulation - a video stands in for a live
+                    roadside camera, frames are periodically grabbed and
+                    run through the real model, exactly like a real
+                    camera integration would work. */}
+                {mySession && (
+                  <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(0,0,0,0.06)' }}>
+                    <div className="text-xs font-semibold text-muted mb-2" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Video size={12} /> Simulated CCTV Feed
+                    </div>
+                    <CCTVFeedSimulator
+                      rid={mySession.rid}
+                      onDetection={(result) => {
+                        setRealDetectResult(result);
+                      }}
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Siren */}
@@ -701,7 +835,9 @@ const Driver: React.FC = () => {
                       label={mySession?.sirenDetected ? `${mySession.sirenFrequency} Hz` : 'SILENT'}
                       size="sm"
                     />
-                    <button onClick={toggleSirenDetect} disabled={!mySession || polling} className="btn btn-ghost btn-sm" style={{ fontSize: '0.68rem', padding: '2px 8px' }}>Toggle</button>
+                    <Tooltip label="Simulate a new siren frequency reading">
+                      <button onClick={toggleSirenDetect} disabled={!mySession || polling} className="btn btn-ghost btn-sm" style={{ fontSize: '0.68rem', padding: '2px 8px' }}>Toggle</button>
+                    </Tooltip>
                   </div>
                 </div>
                 <SirenWaveform active={mySession?.sirenDetected ?? false} frequency={mySession?.sirenFrequency ?? 0} />
@@ -806,8 +942,8 @@ const Driver: React.FC = () => {
                 </div>
               </div>
               <div className="card-body" style={{ gap: 0 }}>
-              {(mySession?.route ?? ['Dispatch Bay', 'Junction A', 'City Hospital']).map((node, i) => {
-                const route       = mySession?.route ?? ['Dispatch Bay', 'Junction A', 'City Hospital'];
+              {(mySession?.route ?? ['Indiranagar Metro (Dispatch)', '100 Feet Road Junction', 'Manipal Hospital']).map((node, i) => {
+                const route       = mySession?.route ?? ['Indiranagar Metro (Dispatch)', '100 Feet Road Junction', 'Manipal Hospital'];
                 const isCurrent   = isEmergency && i === mySession!.currentNodeIndex;
                 const isPassed    = isEmergency && i < mySession!.currentNodeIndex;
                 const isDestination = i === route.length - 1;
@@ -816,10 +952,10 @@ const Driver: React.FC = () => {
                     <div style={{
                       width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
                       display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 700,
-                      background: isCurrent ? 'var(--c-green-dim)' : isPassed ? 'rgba(59,130,246,0.1)' : 'rgba(255,255,255,0.04)',
-                      border: `1.5px solid ${isCurrent ? 'var(--c-green)' : isPassed ? '#3b82f6' : '#2a3958'}`,
-                      color:  isCurrent ? 'var(--c-green)' : isPassed ? '#3b82f6' : '#4a5878',
-                      boxShadow: isCurrent ? '0 0 12px rgba(16,185,129,0.3)' : 'none',
+                      background: isCurrent ? 'var(--c-green-dim)' : isPassed ? 'rgba(93,125,166,0.1)' : 'rgba(255,255,255,0.04)',
+                      border: `1.5px solid ${isCurrent ? 'var(--c-green)' : isPassed ? '#5D7DA6' : '#2a3958'}`,
+                      color:  isCurrent ? 'var(--c-green)' : isPassed ? '#5D7DA6' : '#4a5878',
+                      boxShadow: isCurrent ? '0 0 12px rgba(134,171,151,0.3)' : 'none',
                     }}>
                       {isDestination ? '🏥' : isPassed && isEmergency ? '✓' : i + 1}
                     </div>

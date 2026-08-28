@@ -5,10 +5,17 @@ import type { AxiosInstance, AxiosError } from 'axios';
 export interface Signal {
   id: string; name: string; junction: string;
   color: 'RED' | 'YELLOW' | 'GREEN'; timer: number; manualOverride: boolean;
+  contested?: boolean; contenderCount?: number;
 }
 
 export interface RouteOption {
   id: string; name: string; nodes: string[]; distance: string; estimatedTime: number;
+}
+
+export interface Hospital {
+  id: string; name: string; node: string; departments: string[]; address: string;
+  distanceKm: number | null; estimatedMinutes: number | null; reachable: boolean;
+  totalBeds: number; availableBeds: number;
 }
 
 export interface AmbulanceSession {
@@ -27,6 +34,8 @@ export interface AmbulanceSession {
     requiredDepartment: string;
     notes: string;
   };
+  hospital: { id: string; name: string; node: string };
+  vitals: { heartRate: number; bpSystolic: number; bpDiastolic: number; spo2: number };
   hospitalAcknowledged: boolean;
   hospitalAcknowledgedAt: string | null;
   prepTasks: { id: string; label: string; done: boolean }[];
@@ -35,7 +44,7 @@ export interface AmbulanceSession {
 export interface SystemState {
   sessions: AmbulanceSession[];
   signals: Signal[];
-  routes: RouteOption[];
+  hospitals: Hospital[];
   systemLoad: number;
   apiLatency: number;
   totalCompleted: number;
@@ -204,10 +213,54 @@ export const fetchLogs = async (limit = 60): Promise<LogEntry[]> => {
   }
 };
 
-// Routes
-export const fetchRoutes = async (): Promise<RouteOption[]> => {
+// Hospitals - real hospital selection (Section 6 of the spec)
+export const fetchHospitals = async (): Promise<Hospital[]> => {
   try {
-    const res = await http.get('/routes');
+    const res = await http.get('/hospitals');
+    return res.data;
+  } catch (error) {
+    throw new Error(handleApiError(error));
+  }
+};
+
+export const updateHospitalCapacity = async (hospitalId: string, availableBeds: number): Promise<{ success: boolean; hospital: Hospital }> => {
+  try {
+    const res = await http.patch(`/hospitals/${hospitalId}/capacity`, { availableBeds });
+    return res.data;
+  } catch (error) {
+    throw new Error(handleApiError(error));
+  }
+};
+
+export interface IncidentHistoryEntry {
+  rid: string;
+  status: 'arrived' | 'cancelled';
+  hospital: { id: string; name: string; node: string };
+  patient: { condition: string; severity: 'critical' | 'serious' | 'stable'; requiredDepartment: string; notes: string };
+  routeName: string;
+  startedAt: string;
+  endedAt: string | null;
+  durationSeconds: number | null;
+  wasVerified: boolean;
+}
+
+export const fetchIncidentHistory = async (statusFilter?: 'arrived' | 'cancelled'): Promise<{
+  history: IncidentHistoryEntry[];
+  summary: { total: number; completed: number; cancelled: number; avgResponseSeconds: number | null };
+}> => {
+  try {
+    const res = await http.get('/emergency/history', { params: statusFilter ? { status: statusFilter } : {} });
+    return res.data;
+  } catch (error) {
+    throw new Error(handleApiError(error));
+  }
+};
+
+// Routes - now computed for a SPECIFIC hospital, since different hospitals
+// mean genuinely different real routes from the driver's dispatch base.
+export const fetchRoutes = async (hospitalId: string): Promise<RouteOption[]> => {
+  try {
+    const res = await http.get('/routes', { params: { hospitalId } });
     return res.data;
   } catch (error) {
     throw new Error(handleApiError(error));
@@ -222,9 +275,9 @@ export interface PatientInfo {
   notes: string;
 }
 
-export const startEmergency = async (routeId: string, patient?: PatientInfo): Promise<{ rid: string; route: string[]; routeName: string; patient: PatientInfo }> => {
+export const startEmergency = async (hospitalId: string, routeId?: string, patient?: PatientInfo): Promise<{ rid: string; route: string[]; routeName: string; hospital: { id: string; name: string; node: string }; patient: PatientInfo }> => {
   try {
-    const res = await http.post('/emergency/start', { routeId, patient });
+    const res = await http.post('/emergency/start', { hospitalId, routeId, patient });
     return res.data;
   } catch (error) {
     throw new Error(handleApiError(error));

@@ -8,18 +8,28 @@ import InteractiveMap from '../components/InteractiveMap';
 import { useToast } from '../components/Toast';
 import { LiveBadge, AnimatedProgress, StatusPulse, AnimatedCounter } from '../components/LiveIndicators';
 import { MetricCard } from '../components/EnhancedCard';
+import EmptyState from '../components/EmptyState';
+import CopyableText from '../components/CopyableText';
+import { useStaircaseLoading, DashboardSkeleton } from '../components/SkeletonLoader';
+import Tooltip from '../components/Tooltip';
+import { soundManager } from '../utils/sound';
 
 // Adjacency mirrors backend CITY_GRAPH - kept here so the dropdown only ever
 // offers valid, actually-adjacent junction pairs (matches server-side validation).
+// Real Bengaluru road network: Indiranagar → Manipal Hospital, Old Airport Road.
 const CITY_GRAPH_JUNCTIONS: Record<string, string[]> = {
-  'Dispatch Bay':     ['Junction A', 'Ring Road'],
-  'Junction A':       ['Dispatch Bay', 'Junction B', 'Central Junction'],
-  'Junction B':       ['Junction A', 'Central Junction', 'Medical Zone'],
-  'Central Junction': ['Junction A', 'Junction B', 'Medical Zone', 'North Gate'],
-  'Medical Zone':     ['Junction B', 'Central Junction', 'City Hospital'],
-  'Ring Road':        ['Dispatch Bay', 'North Gate'],
-  'North Gate':       ['Ring Road', 'Central Junction', 'City Hospital'],
-  'City Hospital':    ['Medical Zone', 'North Gate'],
+  'Indiranagar Metro (Dispatch)':          ['100 Feet Road Junction', 'Domlur Flyover', 'Halasuru (Ulsoor)'],
+  '100 Feet Road Junction':                ['Indiranagar Metro (Dispatch)', 'Domlur Flyover'],
+  'Domlur Flyover':                        ['100 Feet Road Junction', 'Indiranagar Metro (Dispatch)', 'Kodihalli Junction', 'Marathahalli (ORR)'],
+  'Kodihalli Junction':                    ['Domlur Flyover', 'Manipal Hospital', 'Marathahalli (ORR)'],
+  'Marathahalli (ORR)':                    ['Domlur Flyover', 'Kodihalli Junction'],
+  'Manipal Hospital':                      ['Kodihalli Junction'],
+  'Halasuru (Ulsoor)':                     ['Indiranagar Metro (Dispatch)', 'Trinity Circle'],
+  'Trinity Circle':                        ['Halasuru (Ulsoor)', 'Victoria Hospital', 'Adugodi'],
+  'Victoria Hospital':                     ['Trinity Circle'],
+  'Adugodi':                               ['Trinity Circle', 'Silk Board Junction'],
+  'Silk Board Junction':                   ['Adugodi', "St. John's Medical College Hospital"],
+  "St. John's Medical College Hospital":   ['Silk Board Junction'],
 };
 const ALL_JUNCTIONS = Object.keys(CITY_GRAPH_JUNCTIONS);
 
@@ -52,6 +62,29 @@ const Police: React.FC = () => {
   };
 
   useEffect(() => { refreshRoadblocks(); }, []);
+
+  // Audio alerts - a new active emergency plays the siren cue, a signal
+  // becoming contested plays a warning beep. Tracked via refs (not just
+  // comparing to the previous render's props) so this only fires on a
+  // genuine increase, not on every SSE update that happens to include
+  // the same sessions/signals again.
+  const prevActiveCountRef = React.useRef(0);
+  const prevContestedRef = React.useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!state) return;
+    const activeCount = state.sessions.filter(s => s.status === 'active').length;
+    if (activeCount > prevActiveCountRef.current) {
+      soundManager.playEmergencyAlert();
+    }
+    prevActiveCountRef.current = activeCount;
+
+    const contestedNow = new Set(state.signals.filter(s => s.contested).map(s => s.id));
+    const newlyContested = [...contestedNow].some(id => !prevContestedRef.current.has(id));
+    if (newlyContested) {
+      soundManager.playWarning();
+    }
+    prevContestedRef.current = contestedNow;
+  }, [state?.sessions, state?.signals]);
 
   const handleOverride = async (signalId: string, signalName: string, color: string) => {
     try {
@@ -88,10 +121,14 @@ const Police: React.FC = () => {
     }
   };
 
+  const loadStage = useStaircaseLoading(!state);
+
   if (!state) return (
     <>
-      <Nav roleName="Traffic Police" roleColor="#f59e0b" connected={connected} />
-      <div className="loading-screen"><div className="spinner" /><span>Connecting to AERIS stream...</span></div>
+      <Nav roleName="Traffic Police" roleColor="#C89B5C" connected={connected} />
+      {loadStage === 'skeleton' ? <DashboardSkeleton /> : loadStage === 'spinner' ? (
+        <div className="loading-screen"><div className="spinner" /><span>Connecting to AERIS stream...</span></div>
+      ) : null}
     </>
   );
 
@@ -103,7 +140,7 @@ const Police: React.FC = () => {
 
   return (
     <>
-      <Nav roleName="Traffic Police" roleColor="#f59e0b" connected={connected} />
+      <Nav roleName="Traffic Police" roleColor="#C89B5C" connected={connected} />
       <div className="container animate-fade-up">
 
         <div className="page-header">
@@ -161,7 +198,7 @@ const Police: React.FC = () => {
                     flexWrap: 'wrap', gap: 12,
                   }}>
                     <div>
-                      <div className="mono font-semibold" style={{ color: 'var(--c-red-bright)', fontSize: '0.95rem' }}>{session.rid}</div>
+                      <CopyableText value={session.rid} className="mono font-semibold" style={{ color: 'var(--c-red-bright)', fontSize: '0.95rem' }} />
                       <div className="text-xs text-muted">{session.routeName}</div>
                     </div>
                     <div className="text-xs" style={{ flex: 1 }}>
@@ -199,14 +236,15 @@ const Police: React.FC = () => {
               sessions={state.sessions} 
               signals={state.signals.map(s => {
                 const junctionCoords: Record<string, [number, number]> = {
-                  'Junction A': [28.6180, 77.2120],
-                  'Junction B': [28.6220, 77.2150],
-                  'Central Junction': [28.6250, 77.2180],
-                  'Medical Zone': [28.6280, 77.2200],
-                  'Ring Road': [28.6160, 77.2050],
-                  'North Gate': [28.6300, 77.2100],
+                  '100 Feet Road Junction': [12.9719, 77.6412],
+                  'Domlur Flyover': [12.9604, 77.6417],
+                  'Kodihalli Junction': [12.9601, 77.6472],
+                  'Marathahalli (ORR)': [12.9562, 77.7019],
+                  'Halasuru (Ulsoor)': [12.9757, 77.6263],
+                  'Trinity Circle': [12.9730, 77.6170],
+                  'Adugodi': [12.9435, 77.6091],
                 };
-                const [lat, lng] = junctionCoords[s.junction] || [28.6139, 77.2090];
+                const [lat, lng] = junctionCoords[s.junction] || [12.9786, 77.6388];
                 return { id: s.id, name: s.name, color: s.color, lat, lng };
               })} 
               centerOnAmbulance={false}
@@ -243,6 +281,13 @@ const Police: React.FC = () => {
                 {sig.manualOverride && (
                   <span style={{ position: 'absolute', top: 10, right: 10, fontSize: '0.65rem', padding: '3px 8px', background: 'var(--orange-light)', color: 'var(--orange)', borderRadius: 8, fontWeight: 600 }}>MANUAL</span>
                 )}
+                {sig.contested && !sig.manualOverride && (
+                  <Tooltip label={`${sig.contenderCount} ambulances converging - priority resolved by patient acuity`}>
+                    <span style={{ position: 'absolute', top: 10, right: 10, fontSize: '0.65rem', padding: '3px 8px', background: 'var(--red-light)', color: 'var(--red-bright)', borderRadius: 8, fontWeight: 700, animation: 'pulse 1.5s ease-in-out infinite' }}>
+                      ⚠ CONTESTED ×{sig.contenderCount}
+                    </span>
+                  </Tooltip>
+                )}
                 <div className="text-center" style={{ marginBottom: '0.5rem' }}>
                   <div className="font-semibold text-sm" style={{ marginBottom: 2 }}>{sig.name}</div>
                   <div className="text-xs text-muted">{sig.junction}</div>
@@ -253,11 +298,13 @@ const Police: React.FC = () => {
                 </div>
                 <div className="flex gap-2 w-full justify-center" style={{ marginTop: '0.5rem' }}>
                   {(['RED', 'YELLOW', 'GREEN'] as const).map(c => (
-                    <button key={c} onClick={() => handleOverride(sig.id, sig.name, c)}
-                      className={`btn-sig-${c.toLowerCase().charAt(0) === 'r' ? 'r' : c.toLowerCase().charAt(0) === 'y' ? 'y' : 'g'}`}
-                      style={{ opacity: sig.color === c ? 1 : 0.55, transform: sig.color === c ? 'scale(1.05)' : 'scale(1)', transition: 'all 0.2s' }}>
-                      {c.slice(0, 3)}
-                    </button>
+                    <Tooltip key={c} label={`Force ${sig.name} to ${c}`}>
+                      <button onClick={() => handleOverride(sig.id, sig.name, c)}
+                        className={`btn-sig-${c.toLowerCase().charAt(0) === 'r' ? 'r' : c.toLowerCase().charAt(0) === 'y' ? 'y' : 'g'}`}
+                        style={{ opacity: sig.color === c ? 1 : 0.55, transform: sig.color === c ? 'scale(1.05)' : 'scale(1)', transition: 'all 0.2s' }}>
+                        {c.slice(0, 3)}
+                      </button>
+                    </Tooltip>
                   ))}
                 </div>
               </div>
@@ -301,7 +348,11 @@ const Police: React.FC = () => {
             </div>
 
             {blocked.length === 0 ? (
-              <div className="text-xs text-muted">No roads currently blocked.</div>
+              <EmptyState
+                icon={Construction}
+                title="No roads currently blocked"
+                subtitle="Report a blocked segment above and any active ambulance crossing it will be rerouted automatically."
+              />
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {blocked.map(([a, b]) => (

@@ -1,13 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Server, Terminal, RefreshCw, Activity, Cpu, Database, Wifi, Zap, HardDrive, Trash2 } from 'lucide-react';
+import { Server, Terminal, RefreshCw, Activity, Cpu, Database, Wifi, Zap, HardDrive, Trash2, Clock, Download } from 'lucide-react';
 import { useSSE } from '../hooks/usePoll';
-import { resetSystem, deleteSession, fetchSignalEngine } from '../api';
-import type { SignalEngineStatus } from '../api';
+import { resetSystem, deleteSession, fetchSignalEngine, fetchIncidentHistory } from '../api';
+import type { SignalEngineStatus, IncidentHistoryEntry } from '../api';
 import Nav from '../components/Nav';
 import TrafficLight from '../components/TrafficLight';
 import InteractiveMap from '../components/InteractiveMap';
 import { useToast } from '../components/Toast';
 import { MetricCard } from '../components/EnhancedCard';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { useStaircaseLoading, DashboardSkeleton } from '../components/SkeletonLoader';
+import CopyableText from '../components/CopyableText';
+import Tooltip from '../components/Tooltip';
 
 // Mini sparkline chart component
 const Sparkline: React.FC<{ data: number[]; color: string; label: string; value: string }> = ({ data, color, label, value }) => {
@@ -87,38 +91,103 @@ const Admin: React.FC = () => {
     setLatHist (h => [...h.slice(-29), state.apiLatency]);
   }, [state?.systemLoad]);
 
-  const handleReset = async () => {
-    if (!window.confirm('Hard reset clears ALL active sessions and logs. Continue?')) return;
-    setResetLoading(true);
-    try { 
-      await resetSystem(); 
-      toast('System hard reset complete', 'success'); 
-    } catch (error: any) { 
-      console.error('Reset error:', error);
-      toast(error.message || 'Reset failed', 'error'); 
-    } finally {
-      setResetLoading(false);
-    }
+  const [history, setHistory] = useState<IncidentHistoryEntry[]>([]);
+  const [historySummary, setHistorySummary] = useState<{ total: number; completed: number; cancelled: number; avgResponseSeconds: number | null } | null>(null);
+
+  useEffect(() => {
+    const loadHistory = async () => {
+      try {
+        const res = await fetchIncidentHistory();
+        setHistory(res.history);
+        setHistorySummary(res.summary);
+      } catch (err) {
+        console.error('Failed to load incident history', err);
+      }
+    };
+    loadHistory();
+    const interval = setInterval(loadHistory, 8000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const [confirmState, setConfirmState] = useState<{
+    open: boolean; title: string; message: string; danger: boolean; onConfirm: () => void;
+  }>({ open: false, title: '', message: '', danger: false, onConfirm: () => {} });
+
+  const closeConfirm = () => setConfirmState(s => ({ ...s, open: false }));
+
+  const handleReset = () => {
+    setConfirmState({
+      open: true,
+      title: 'Hard Reset System',
+      danger: true,
+      message: 'This clears ALL active sessions and logs immediately. This cannot be undone. Continue?',
+      onConfirm: async () => {
+        closeConfirm();
+        setResetLoading(true);
+        try {
+          await resetSystem();
+          toast('System hard reset complete', 'success');
+        } catch (error: any) {
+          console.error('Reset error:', error);
+          toast(error.message || 'Reset failed', 'error');
+        } finally {
+          setResetLoading(false);
+        }
+      },
+    });
   };
 
-  const handleDeleteSession = async (rid: string) => {
-    if (!window.confirm(`Delete session ${rid}?`)) return;
-    setDeletingSession(rid);
-    try { 
-      await deleteSession(rid); 
-      toast(`Session ${rid} terminated`, 'warning'); 
-    } catch (error: any) { 
-      console.error('Delete session error:', error);
-      toast(error.message || 'Session delete failed', 'error'); 
-    } finally {
-      setDeletingSession(null);
-    }
+  const handleDeleteSession = (rid: string) => {
+    setConfirmState({
+      open: true,
+      title: 'Delete Session',
+      danger: true,
+      message: `This will permanently terminate session ${rid}. Continue?`,
+      onConfirm: async () => {
+        closeConfirm();
+        setDeletingSession(rid);
+        try {
+          await deleteSession(rid);
+          toast(`Session ${rid} terminated`, 'warning');
+        } catch (error: any) {
+          console.error('Delete session error:', error);
+          toast(error.message || 'Session delete failed', 'error');
+        } finally {
+          setDeletingSession(null);
+        }
+      },
+    });
   };
+
+  const handleExportHistory = () => {
+    const headers = ['RID', 'Hospital', 'Condition', 'Severity', 'Department', 'Status', 'Route', 'Started', 'Ended', 'Duration (s)', 'Verified'];
+    const escapeCsv = (val: string) => `"${String(val).replace(/"/g, '""')}"`;
+    const rows = history.map(h => [
+      h.rid, h.hospital.name, h.patient.condition, h.patient.severity, h.patient.requiredDepartment,
+      h.status, h.routeName, h.startedAt, h.endedAt || '', h.durationSeconds ?? '', h.wasVerified ? 'Yes' : 'No',
+    ].map(v => escapeCsv(String(v))).join(','));
+
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `aeris-incident-history-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast(`Exported ${history.length} incident${history.length !== 1 ? 's' : ''} to CSV`, 'success');
+  };
+
+  const loadStage = useStaircaseLoading(!state);
 
   if (!state) return (
     <>
-      <Nav roleName="System Admin" roleColor="#8b5cf6" connected={connected} />
-      <div className="loading-screen"><div className="spinner" /><span>Connecting to AERIS stream...</span></div>
+      <Nav roleName="System Admin" roleColor="#8C7CB5" connected={connected} />
+      {loadStage === 'skeleton' ? <DashboardSkeleton /> : loadStage === 'spinner' ? (
+        <div className="loading-screen"><div className="spinner" /><span>Connecting to AERIS stream...</span></div>
+      ) : null}
     </>
   );
 
@@ -129,7 +198,7 @@ const Admin: React.FC = () => {
 
   return (
     <>
-      <Nav roleName="System Admin" roleColor="#8b5cf6" connected={connected} />
+      <Nav roleName="System Admin" roleColor="#8C7CB5" connected={connected} />
       <div className="container animate-fade-up">
 
         {/* SSE Connection Error Banner */}
@@ -179,8 +248,8 @@ const Admin: React.FC = () => {
 
         {/* Sparklines */}
         <div className="grid-2 mb-4">
-          <Sparkline data={loadHist} color={state.systemLoad > 70 ? '#ef4444' : '#f59e0b'} label="System Load" value={`${state.systemLoad}%`} />
-          <Sparkline data={latHist}  color="#2563EB" label="API Latency" value={`${state.apiLatency}ms`} />
+          <Sparkline data={loadHist} color={state.systemLoad > 70 ? '#ef4444' : '#C89B5C'} label="System Load" value={`${state.systemLoad}%`} />
+          <Sparkline data={latHist}  color="#46617F" label="API Latency" value={`${state.apiLatency}ms`} />
         </div>
 
         {/* Interactive Map */}
@@ -191,14 +260,15 @@ const Admin: React.FC = () => {
               sessions={state.sessions} 
               signals={state.signals.map(s => {
                 const junctionCoords: Record<string, [number, number]> = {
-                  'Junction A': [28.6180, 77.2120],
-                  'Junction B': [28.6220, 77.2150],
-                  'Central Junction': [28.6250, 77.2180],
-                  'Medical Zone': [28.6280, 77.2200],
-                  'Ring Road': [28.6160, 77.2050],
-                  'North Gate': [28.6300, 77.2100],
+                  '100 Feet Road Junction': [12.9719, 77.6412],
+                  'Domlur Flyover': [12.9604, 77.6417],
+                  'Kodihalli Junction': [12.9601, 77.6472],
+                  'Marathahalli (ORR)': [12.9562, 77.7019],
+                  'Halasuru (Ulsoor)': [12.9757, 77.6263],
+                  'Trinity Circle': [12.9730, 77.6170],
+                  'Adugodi': [12.9435, 77.6091],
                 };
-                const [lat, lng] = junctionCoords[s.junction] || [28.6139, 77.2090];
+                const [lat, lng] = junctionCoords[s.junction] || [12.9786, 77.6388];
                 return { id: s.id, name: s.name, color: s.color, lat, lng };
               })} 
               centerOnAmbulance={false}
@@ -227,7 +297,7 @@ const Admin: React.FC = () => {
                   <tbody>
                     {all.map(s => (
                       <tr key={s.rid}>
-                        <td className="mono font-semibold" style={{ color: s.status === 'active' ? 'var(--c-red-bright)' : 'var(--text-secondary)', fontSize: '0.82rem' }}>{s.rid}</td>
+                        <td className="mono font-semibold" style={{ color: s.status === 'active' ? 'var(--c-red-bright)' : 'var(--text-secondary)', fontSize: '0.82rem' }}><CopyableText value={s.rid} /></td>
                         <td className="text-xs text-muted">{s.routeName.split(' (')[0]}</td>
                         <td>
                           <span className={`status-badge text-xs ${s.status === 'active' ? 'badge-red' : s.status === 'arrived' ? 'badge-green' : 'badge-blue'}`}>
@@ -335,7 +405,7 @@ const Admin: React.FC = () => {
               ) : signalEngineError ? (
                 <div className="text-center py-4">
                   <div className="text-xs text-red mb-2">⚠️ {signalEngineError}</div>
-                  <div className="text-xs text-quiet">Signal control engine offline<br />Run: npm run dev:signalEngine (port 4001)</div>
+                  <div className="text-xs text-quiet">Signal control engine offline<br />Run: npm run dev:signals (port 4001)</div>
                 </div>
               ) : signalEngine ? (
                 <>
@@ -386,14 +456,83 @@ const Admin: React.FC = () => {
               ) : (
                 <div className="text-center text-sm text-muted py-4">
                   Signal control engine offline<br />
-                  <span className="text-xs text-quiet">Run: npm run dev:signalEngine (port 4001)</span>
+                  <span className="text-xs text-quiet">Run: npm run dev:signals (port 4001)</span>
                 </div>
               )}
             </div>
           </div>
         </div>
 
+        {/* Incident History - real post-incident reporting with response
+            time metrics, not just a live count. */}
+        <div className="card mb-4 animate-fade-up">
+          <div className="card-header">
+            <div className="card-title">
+              <div className="card-title-icon"><Clock size={16} /></div>
+              Incident History
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              {historySummary && (
+                <div className="text-xs text-muted">
+                  {historySummary.completed} completed · {historySummary.cancelled} cancelled
+                  {historySummary.avgResponseSeconds !== null && (
+                    <> · avg response {Math.floor(historySummary.avgResponseSeconds / 60)}m {historySummary.avgResponseSeconds % 60}s</>
+                  )}
+                </div>
+              )}
+              {history.length > 0 && (
+                <Tooltip label="Download all incident history as CSV">
+                  <button onClick={handleExportHistory} className="btn btn-ghost btn-sm" style={{ gap: 6 }}>
+                    <Download size={12} /> Export CSV
+                  </button>
+                </Tooltip>
+              )}
+            </div>
+          </div>
+          <div className="card-body">
+            {history.length === 0 ? (
+              <div className="text-xs text-muted text-center py-4">No completed or cancelled emergencies yet.</div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table className="data-table" style={{ width: '100%', fontSize: '0.8rem' }}>
+                  <thead>
+                    <tr>
+                      <th>RID</th><th>Hospital</th><th>Severity</th><th>Status</th><th>Duration</th><th>Ended</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.slice(0, 15).map(h => (
+                      <tr key={h.rid}>
+                        <td className="mono font-semibold"><CopyableText value={h.rid} /></td>
+                        <td>{h.hospital.name}</td>
+                        <td style={{ textTransform: 'capitalize' }}>{h.patient.severity}</td>
+                        <td>
+                          <span className={`status-badge ${h.status === 'arrived' ? 'badge-green' : 'badge-gray'}`} style={{ fontSize: '0.7rem' }}>
+                            {h.status === 'arrived' ? 'Delivered' : 'Cancelled'}
+                          </span>
+                        </td>
+                        <td>{h.durationSeconds !== null ? `${Math.floor(h.durationSeconds / 60)}m ${h.durationSeconds % 60}s` : '—'}</td>
+                        <td className="text-xs text-muted">{h.endedAt ? new Date(h.endedAt).toLocaleTimeString('en-IN', { hour12: false }) : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+
       </div>
+
+      <ConfirmDialog
+        open={confirmState.open}
+        title={confirmState.title}
+        message={confirmState.message}
+        danger={confirmState.danger}
+        confirmLabel={confirmState.danger ? 'Delete' : 'Confirm'}
+        onConfirm={confirmState.onConfirm}
+        onCancel={closeConfirm}
+      />
     </>
   );
 };
