@@ -46,6 +46,11 @@ interface LogEntry {
 }
 
 interface AmbulanceSession {
+  // Internal unique key for this session (Map key). A single ambulance
+  // (rid) can have many sessions over time; keying by rid overwrote history.
+  id: string;
+  // Ambulance display/identity RID (e.g. AMB-101). Stable per driver,
+  // shown in fleet views, logs and SSE payloads. NOT unique per session.
   rid: string;
   driverId: string;
   route: string[];
@@ -106,7 +111,7 @@ interface SSEClient {
 // ═══════════════════════════════════════════════════════════════
 //  USERS (hashed passwords for real auth)
 // ═══════════════════════════════════════════════════════════════
-const USERS: Record<string, { id: string; name: string; role: UserRole; hash: string; ambulanceRid?: string; dispatchNode?: string }> = {
+const USERS: Record<string, { id: string; name: string; role: UserRole; hash: string; ambulanceRid?: string; dispatchNode?: string; hospitalId?: string }> = {
   // Multiple driver accounts across TWO real dispatch bases - Indiranagar
   // (east) and Silk Board Junction (south) - giving genuine multi-base
   // ambulance coverage instead of every ambulance starting from one spot.
@@ -114,7 +119,15 @@ const USERS: Record<string, { id: string; name: string; role: UserRole; hash: st
   'driver2':  { id: uuidv4(), name: 'Suresh Nair',          role: 'driver',   hash: bcrypt.hashSync('driver123', 8),   ambulanceRid: 'AMB-102', dispatchNode: 'Silk Board Junction' },
   'driver3':  { id: uuidv4(), name: 'Anitha Rao',           role: 'driver',   hash: bcrypt.hashSync('driver123', 8),   ambulanceRid: 'AMB-103', dispatchNode: 'Indiranagar Metro (Dispatch)' },
   'police':   { id: uuidv4(), name: 'Insp. Rajesh Verma',   role: 'police',   hash: bcrypt.hashSync('police123', 8) },
-  'hospital': { id: uuidv4(), name: 'Dr. Priya Sharma',     role: 'hospital', hash: bcrypt.hashSync('hospital123', 8) },
+  // Real per-hospital accounts - previously one generic 'hospital' login
+  // could edit ANY hospital's bed count or acknowledge/prep for ANY
+  // hospital's incoming patients, which doesn't match how a real hospital
+  // staff account should work (only their own hospital). 'hospital' is
+  // kept as a valid login (mapped to Manipal) for backward compatibility
+  // with existing documentation/tests; hospital2/hospital3 are new.
+  'hospital':  { id: uuidv4(), name: 'Dr. Priya Sharma',   role: 'hospital', hash: bcrypt.hashSync('hospital123', 8), hospitalId: 'manipal' },
+  'hospital2': { id: uuidv4(), name: 'Dr. Arjun Reddy',    role: 'hospital', hash: bcrypt.hashSync('hospital123', 8), hospitalId: 'stjohns' },
+  'hospital3': { id: uuidv4(), name: 'Dr. Lakshmi Iyer',   role: 'hospital', hash: bcrypt.hashSync('hospital123', 8), hospitalId: 'victoria' },
   'admin':    { id: uuidv4(), name: 'System Administrator', role: 'admin',    hash: bcrypt.hashSync('admin123', 8) },
 };
 
@@ -330,7 +343,12 @@ function computeRouteOptions(fromNode: string, hospital: Hospital, blocked: Set<
 // ═══════════════════════════════════════════════════════════════
 //  GLOBAL STATE
 // ═══════════════════════════════════════════════════════════════
-const sessions = new Map<string, AmbulanceSession>(); // RID → session
+// Session ID (UUID) → session. Keyed by session.id, NOT by ambulance
+// rid, so consecutive emergencies from the same ambulance coexist and
+// completed history survives. Use resolveSession() for all lookups: it
+// accepts either a session id or an ambulance rid (resolving rid to the
+// active session when several sessions share it).
+const sessions = new Map<string, AmbulanceSession>();
 const logs: LogEntry[] = [];
 let sseClients: SSEClient[] = [];
 
@@ -406,6 +424,20 @@ function verify(req: express.Request, res: express.Response, next: express.NextF
   } catch { res.status(401).json({ error: 'Invalid token' }); }
 }
 
+// Resolve a session by internal id (UUID) or ambulance rid. Direct id
+// lookup first; otherwise fall back to the active session carrying that
+// rid (active ops such as stop/toggle/ack always mean the live one).
+// Returns undefined when nothing matches.
+function resolveSession(key: string): AmbulanceSession | undefined {
+  if (!key) return undefined;
+  const direct = sessions.get(key);
+  if (direct) return direct;
+  const active = [...sessions.values()].find(s => s.rid === key && s.status === 'active');
+  if (active) return active;
+  const any = [...sessions.values()].find(s => s.rid === key);
+  return any;
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  DETECTION SIMULATION
 //  In a real system: camera endpoint receives an image/frame,
@@ -442,9 +474,9 @@ function simulateDetection(session: AmbulanceSession) {
   }
 
   // Fail-safe logic:
-  // camera ✓ OR siren ✓ → verified
-  // both fail → still verified if emergency manually activated (manual override)
-  session.isVerified = session.cameraDetected || session.sirenDetected;
+  // ACTIVE + (camera ✓ OR siren ✓) → verified. A non-active session keeps
+  // whatever its flags say but must never report verified from stale flags.
+  session.isVerified = session.status === 'active' && (session.cameraDetected || session.sirenDetected);
 
   // Log detection state changes
   if (prevCam && !session.cameraDetected)
@@ -511,12 +543,6 @@ function recalculateAffectedRoutes(blockedFrom: string, blockedTo: string) {
 //  Determines which signals should be GREEN based on ambulance GPS
 //  position and distance threshold. Signals within proximity → GREEN.
 // ═══════════════════════════════════════════════════════════════
-const JUNCTION_TO_SIGNAL: Record<string, string> = {
-  '100 Feet Road Junction': 'S1', 'Domlur Flyover': 'S2',
-  'Kodihalli Junction': 'S3', 'Marathahalli (ORR)': 'S4',
-  'Halasuru (Ulsoor)': 'S5', 'Trinity Circle': 'S6', 'Adugodi': 'S7',
-};
-
 // Multi-ambulance conflict resolution (Section 23 of the original spec:
 // "Multiple ambulance conflict management" - previously the corridor
 // logic silently gave the signal to whichever ambulance was physically
@@ -525,9 +551,22 @@ const JUNCTION_TO_SIGNAL: Record<string, string> = {
 // just proximity.
 const SEVERITY_RANK: Record<string, number> = { critical: 3, serious: 2, stable: 1 };
 
+// Clear corridor-claim state (contested/contenderCount) on every signal.
+// Called on each corridor exit path - the no-active early return below,
+// the tick idle branch, emergency stop, admin delete and system reset - so
+// a contested flag set while two ambulances competed can never stick
+// around after the emergency ends. Color/timer handling stays with each
+// caller; this resets only arbitration state. Never touches manualOverride.
+function clearCorridor() {
+  signals.forEach(sig => {
+    sig.contested = false;
+    sig.contenderCount = 0;
+  });
+}
+
 function updateGreenCorridor() {
   const activeSessions = [...sessions.values()].filter(s => s.status === 'active');
-  
+
   if (activeSessions.length === 0) {
     // No active sessions — all signals back to RED
     signals.forEach(sig => {
@@ -538,6 +577,7 @@ function updateGreenCorridor() {
         sendSignalCommand(sig.name, 'RED');
       }
     });
+    clearCorridor();
     return;
   }
 
@@ -669,8 +709,12 @@ setInterval(() => {
     const currentNode = session.route[session.currentNodeIndex];
     const nextNode = session.route[session.currentNodeIndex + 1];
     if (nextNode) {
-      const startGPS = GPS_COORDS[currentNode];
-      const endGPS = GPS_COORDS[nextNode];
+      // Defensive: fall back to last known position if a route ever
+      // references a node with no coordinates (same pattern as the
+      // roadblock-recalculation and node-arrival paths below) instead of
+      // throwing inside the interval and crashing the process.
+      const startGPS = GPS_COORDS[currentNode] || session.currentGPS;
+      const endGPS = GPS_COORDS[nextNode] || session.currentGPS;
       const progress = Math.min(session.ticksSinceAdvance / 5, 1);
       session.currentGPS = [
         startGPS[0] + (endGPS[0] - startGPS[0]) * progress,
@@ -709,6 +753,7 @@ setInterval(() => {
         sendSignalCommand(sig.name, 'RED');
       }
     });
+    clearCorridor();
   }
 
   // Update system metrics
@@ -783,6 +828,10 @@ app.post('/api/auth/login', (req, res) => {
     addLog(`❌ Failed login attempt: ${username}`, 'warning');
     res.status(401).json({ error: 'Invalid credentials' }); return;
   }
+  // Credentials verified - this login was legitimate, so it must not count
+  // toward the failed-attempt limit. Clear the counter only here, after
+  // genuine success; failures above keep accumulating toward the 429.
+  loginAttempts.delete(ip);
   const token = jwt.sign({ sub: user.id, username, role: user.role, name: user.name }, JWT_SECRET, { expiresIn: '8h' });
   addLog(`🔐 ${user.name} logged in as ${user.role}`, 'system');
   res.json({ token, user: { id: user.id, name: user.name, role: user.role, username } });
@@ -825,6 +874,17 @@ app.patch('/api/hospitals/:id/capacity', verify, (req: any, res) => {
   if (req.user.role !== 'hospital' && req.user.role !== 'admin') {
     res.status(403).json({ error: 'Hospital staff only' }); return;
   }
+
+  // A hospital-role login can only update THEIR OWN hospital's capacity,
+  // not any hospital in the network - was previously unrestricted (any
+  // hospital login could edit any hospital), which doesn't match how
+  // real per-hospital staff accounts should behave. Admin is exempt.
+  const userRecord = USERS[(req.user.username || '').toLowerCase()];
+  if (req.user.role === 'hospital' && userRecord?.hospitalId !== req.params.id) {
+    res.status(403).json({ error: 'You can only update your own hospital\'s bed capacity' });
+    return;
+  }
+
   const hospital = HOSPITALS.find(h => h.id === req.params.id);
   if (!hospital) { res.status(404).json({ error: 'Hospital not found' }); return; }
 
@@ -847,8 +907,10 @@ app.get('/api/routes', verify, (req: any, res) => {
   const userRecord = USERS[(req.user.username || '').toLowerCase()];
   const fromNode = userRecord?.dispatchNode || 'Indiranagar Metro (Dispatch)';
 
-  const hospitalId = (req.query.hospitalId as string) || HOSPITALS[0].id;
-  const hospital = HOSPITALS.find(h => h.id === hospitalId) || HOSPITALS[0];
+  // hospitalId is required - never silently fall back to another hospital.
+  const hospitalId = req.query.hospitalId as string | undefined;
+  const hospital = hospitalId ? HOSPITALS.find(h => h.id === hospitalId) : undefined;
+  if (!hospital) { res.status(400).json({ error: 'Valid hospitalId is required' }); return; }
 
   res.json(computeRouteOptions(fromNode, hospital));
 });
@@ -857,19 +919,28 @@ app.get('/api/routes', verify, (req: any, res) => {
 app.post('/api/emergency/start', verify, (req: any, res) => {
   const { hospitalId, routeId, patient } = req.body;
 
+  // Only drivers (and admin) may create ambulance emergencies - police and
+  // hospital roles have no dispatch capability in the role model.
+  if (req.user.role !== 'driver' && req.user.role !== 'admin') {
+    res.status(403).json({ error: 'Driver or Admin only' }); return;
+  }
+
   // Check if this driver already has an active session
   const existingSession = [...sessions.values()].find(
     s => s.driverId === req.user.sub && s.status === 'active'
   );
   if (existingSession) {
-    res.status(400).json({ error: 'You already have an active emergency session', rid: existingSession.rid });
+    res.status(400).json({ error: 'You already have an active emergency session', id: existingSession.id, rid: existingSession.rid });
     return;
   }
 
   const userRecord = USERS[(req.user.username || '').toLowerCase()];
   const fromNode = userRecord?.dispatchNode || 'Indiranagar Metro (Dispatch)';
 
-  const hospital = HOSPITALS.find(h => h.id === hospitalId) || HOSPITALS[0];
+  // hospitalId is required - never silently dispatch to another hospital.
+  // This runs before any session is created, so a 400 here creates nothing.
+  const hospital = HOSPITALS.find(h => h.id === hospitalId);
+  if (!hospital) { res.status(400).json({ error: 'Valid hospitalId is required' }); return; }
   const routeOptions = computeRouteOptions(fromNode, hospital, blockedEdges);
   if (routeOptions.length === 0) {
     res.status(422).json({ error: `No available route from ${fromNode} to ${hospital.name} - all roads blocked` });
@@ -880,7 +951,11 @@ app.post('/api/emergency/start', verify, (req: any, res) => {
   // Use this driver's assigned ambulance RID if they have one (see USERS),
   // otherwise fall back to a random one - keeps each driver account mapped
   // to a consistent, recognizable ambulance across the Police/Admin fleet views.
+  // The Map key is a fresh UUID per session (id) so a second emergency from
+  // the same ambulance adds a new entry instead of overwriting history;
+  // rid stays the stable ambulance display identity.
   const rid = userRecord?.ambulanceRid || `AMB-${uuidv4().slice(0, 6).toUpperCase()}`;
+  const id = uuidv4();
 
   // Default prep checklist - hospital can check these off as they're done;
   // this is what used to be hardcoded static data in Hospital.tsx.
@@ -896,7 +971,7 @@ app.post('/api/emergency/start', verify, (req: any, res) => {
     ['critical', 'serious', 'stable'].includes(patient?.severity) ? patient.severity : 'serious';
 
   const session: AmbulanceSession = {
-    rid, driverId: req.user.sub,
+    id, rid, driverId: req.user.sub,
     route: route.nodes, routeName: route.name,
     currentNodeIndex: 0,
     currentGPS: GPS_COORDS[route.nodes[0]] || [12.9786, 77.6388],
@@ -920,7 +995,7 @@ app.post('/api/emergency/start', verify, (req: any, res) => {
     prepTasks: defaultPrepTasks,
   };
 
-  sessions.set(rid, session);
+  sessions.set(id, session);
   addLog(`🚨 EMERGENCY ACTIVATED — RID: ${rid} (Driver: ${req.user.name}) from ${fromNode}`, 'error', rid);
   addLog(`🏥 Destination: ${hospital.name} (${hospital.address})`, 'info', rid);
   addLog(`📍 Route computed via Dijkstra: ${route.nodes.join(' → ')} (${route.distance})`, 'info', rid);
@@ -930,22 +1005,32 @@ app.post('/api/emergency/start', verify, (req: any, res) => {
   // Immediately send corridor state to the signal control engine
   updateGreenCorridor();
 
-  res.status(201).json({ rid, route: route.nodes, routeName: route.name, hospital: session.hospital, patient: session.patient });
+  res.status(201).json({ id, rid, route: route.nodes, routeName: route.name, hospital: session.hospital, patient: session.patient });
 });
 
 app.post('/api/emergency/stop', verify, (req: any, res) => {
   const { rid } = req.body;
-  const session = sessions.get(rid);
+  const session = resolveSession(rid);
   if (!session) { res.status(404).json({ error: 'Session not found' }); return; }
+
+  // Only the owning driver or an admin may stop a session - a driver must
+  // not cancel another driver's emergency, and police/hospital roles have
+  // no stop capability.
+  if (req.user.role !== 'admin' && session.driverId !== req.user.sub) {
+    res.status(403).json({ error: 'You can only stop your own emergency session' }); return;
+  }
 
   session.status = 'cancelled';
   session.endedAt = new Date().toISOString();
-  addLog(`🛑 Emergency ${rid} manually cancelled by ${req.user.name}`, 'warning', rid);
+  addLog(`🛑 Emergency ${session.rid} manually cancelled by ${req.user.name}`, 'warning', session.rid);
 
   // Release corridor
   signals.forEach(sig => {
     if (!sig.manualOverride) { sig.color = 'RED'; sig.timer = 30; sendSignalCommand(sig.name, 'RED'); }
   });
+  // Drop any contested claim from this session before recomputing for
+  // remaining ambulances (recompute repopulates when still contested).
+  clearCorridor();
   updateGreenCorridor();
 
   res.json({ success: true });
@@ -958,8 +1043,16 @@ app.post('/api/emergency/:rid/acknowledge', verify, (req: any, res) => {
   if (req.user.role !== 'hospital' && req.user.role !== 'admin') {
     res.status(403).json({ error: 'Hospital staff only' }); return;
   }
-  const session = sessions.get(req.params.rid);
+  const session = resolveSession(req.params.rid);
   if (!session) { res.status(404).json({ error: 'Session not found' }); return; }
+
+  // A hospital login can only acknowledge patients actually headed to
+  // THEIR hospital, not any ambulance in the network.
+  const userRecord = USERS[(req.user.username || '').toLowerCase()];
+  if (req.user.role === 'hospital' && userRecord?.hospitalId !== session.hospital.id) {
+    res.status(403).json({ error: 'This ambulance is not headed to your hospital' });
+    return;
+  }
 
   session.hospitalAcknowledged = true;
   session.hospitalAcknowledgedAt = new Date().toISOString();
@@ -972,8 +1065,14 @@ app.post('/api/emergency/:rid/prep', verify, (req: any, res) => {
   if (req.user.role !== 'hospital' && req.user.role !== 'admin') {
     res.status(403).json({ error: 'Hospital staff only' }); return;
   }
-  const session = sessions.get(req.params.rid);
+  const session = resolveSession(req.params.rid);
   if (!session) { res.status(404).json({ error: 'Session not found' }); return; }
+
+  const userRecord = USERS[(req.user.username || '').toLowerCase()];
+  if (req.user.role === 'hospital' && userRecord?.hospitalId !== session.hospital.id) {
+    res.status(403).json({ error: 'This ambulance is not headed to your hospital' });
+    return;
+  }
 
   const { taskId, done } = req.body;
   const task = session.prepTasks.find(t => t.id === taskId);
@@ -992,6 +1091,12 @@ app.post('/api/signal/override', verify, (req: any, res) => {
   const { signalId, color } = req.body;
   const sig = signals.find(s => s.id === signalId);
   if (!sig) { res.status(404).json({ error: 'Signal not found' }); return; }
+
+  // Strict validation before any state mutation - an invalid color must
+  // neither change the signal nor reach the signal control engine.
+  if (color !== 'RED' && color !== 'YELLOW' && color !== 'GREEN') {
+    res.status(400).json({ error: 'color must be RED, YELLOW or GREEN' }); return;
+  }
 
   sig.color = color as SignalColor;
   sig.manualOverride = true;
@@ -1059,10 +1164,14 @@ app.delete('/api/roadblock', verify, (req: any, res) => {
 // Manual toggle camera detection
 app.post('/api/detect/camera/toggle', verify, (req: any, res) => {
   const { rid, detected, confidence } = req.body;
-  const session = sessions.get(rid);
+  const session = resolveSession(rid);
   if (!session) { res.status(404).json({ error: 'Session not found' }); return; }
-  
-  const prevDetected = session.cameraDetected;
+
+  // Same ownership rule as stop: owning driver or admin only.
+  if (req.user.role !== 'admin' && session.driverId !== req.user.sub) {
+    res.status(403).json({ error: 'You can only modify your own emergency session' }); return;
+  }
+
   session.cameraDetected = detected ?? !session.cameraDetected;
   session.cameraConfidence = confidence ?? (session.cameraDetected ? 85 : 20);
   
@@ -1101,10 +1210,14 @@ app.post('/api/detect/camera/toggle', verify, (req: any, res) => {
 // Manual toggle siren detection
 app.post('/api/detect/siren/toggle', verify, (req: any, res) => {
   const { rid, detected, frequency } = req.body;
-  const session = sessions.get(rid);
+  const session = resolveSession(rid);
   if (!session) { res.status(404).json({ error: 'Session not found' }); return; }
-  
-  const prevDetected = session.sirenDetected;
+
+  // Same ownership rule as stop: owning driver or admin only.
+  if (req.user.role !== 'admin' && session.driverId !== req.user.sub) {
+    res.status(403).json({ error: 'You can only modify your own emergency session' }); return;
+  }
+
   session.sirenDetected = detected ?? !session.sirenDetected;
   session.sirenFrequency = frequency ?? (session.sirenDetected ? 920 : 50);
   
@@ -1147,7 +1260,7 @@ app.post('/api/detect/siren/toggle', verify, (req: any, res) => {
 // nothing breaks if the frontend/hardware camera isn't wired up yet.
 app.post('/api/detect/camera', verify, async (req: any, res) => {
   const { rid, frameBase64 } = req.body;
-  const session = sessions.get(rid);
+  const session = resolveSession(rid);
   if (!session) { res.status(404).json({ error: 'Session not found' }); return; }
 
   if (!frameBase64) {
@@ -1205,7 +1318,7 @@ app.post('/api/detect/camera', verify, async (req: any, res) => {
 // to the original simulated/manual-frequency behavior when no clip is sent.
 app.post('/api/detect/siren', verify, async (req: any, res) => {
   const { rid, frequency, audioBase64 } = req.body;
-  const session = sessions.get(rid);
+  const session = resolveSession(rid);
   if (!session) { res.status(404).json({ error: 'Session not found' }); return; }
 
   if (!audioBase64) {
@@ -1259,6 +1372,7 @@ app.get('/api/emergency/history', verify, (req: any, res) => {
       const endMs = s.endedAt ? new Date(s.endedAt).getTime() : null;
       const durationSeconds = endMs !== null ? Math.round((endMs - startMs) / 1000) : null;
       return {
+        id: s.id,
         rid: s.rid,
         status: s.status,
         hospital: s.hospital,
@@ -1304,7 +1418,10 @@ app.get('/api/routes/computed', (_req, res) => {
   const bases = Object.keys(AMBULANCE_BASES);
   const results = bases.flatMap(base =>
     HOSPITALS.map(hospital => {
-      const path = dijkstra(base, hospital.node);
+      // Same blocked-edge state as live emergency routing - never advertise
+      // a path through a reported roadblock. Unreachable pairs keep the
+      // existing shape: path [] with distanceKm null.
+      const path = dijkstra(base, hospital.node, blockedEdges);
       return {
         from: base,
         to: hospital.name,
@@ -1391,10 +1508,17 @@ app.get('/api/stream', (req, res) => {
 app.delete('/api/session/:rid', verify, (req: any, res) => {
   if (req.user.role !== 'admin') { res.status(403).json({ error: 'Admin only' }); return; }
   const { rid } = req.params;
-  const session = sessions.get(rid);
+  const session = resolveSession(rid);
   if (!session) { res.status(404).json({ error: 'Session not found' }); return; }
-  sessions.delete(rid);
-  addLog(`🗑️ Session ${rid} deleted by admin`, 'system');
+  // Active emergencies carry live corridor, SSE and history state - they
+  // must be stopped/cancelled first (which records endedAt) rather than
+  // destructively deleted with no terminal state.
+  if (session.status === 'active') {
+    res.status(400).json({ error: 'Cannot delete an active emergency - stop/cancel it first' }); return;
+  }
+  sessions.delete(session.id);
+  addLog(`🗑️ Session ${session.rid} deleted by admin`, 'system', session.rid);
+  clearCorridor();
   updateGreenCorridor();
   res.json({ success: true });
 });
@@ -1404,6 +1528,14 @@ app.post('/api/system/reset', verify, (req: any, res) => {
   sessions.clear();
   logs.splice(0, logs.length);
   signals.forEach(s => { s.color = 'RED'; s.timer = 30; s.manualOverride = false; });
+  // Full reset must also drop contested claims (see clearCorridor).
+  clearCorridor();
+  // A hard reset returns the city to its initial runtime state: no
+  // roadblocks, no completions counted, no login-attempt history. Static
+  // configuration (users, hospitals, graph, signal definitions) is untouched.
+  blockedEdges.clear();
+  totalCompleted = 0;
+  loginAttempts.clear();
   signalCommandLog.splice(0, signalCommandLog.length);
   addLog('🔄 System hard reset by administrator', 'system');
   signals.forEach(s => sendSignalCommand(s.name, 'RED'));

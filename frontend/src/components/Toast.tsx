@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { CheckCircle2, XCircle, AlertTriangle, Info, X } from 'lucide-react';
 
 type ToastType = 'success' | 'error' | 'warning' | 'info';
@@ -7,6 +7,7 @@ interface Toast {
   id: string;
   message: string;
   type: ToastType;
+  leaving: boolean;
 }
 
 interface ToastContextValue {
@@ -33,16 +34,34 @@ const colors: Record<ToastType, { bg: string; border: string; icon: string }> = 
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  // No timer may outlive the provider - cancelled together on unmount.
+  useEffect(() => () => { timers.current.forEach(clearTimeout); timers.current = []; }, []);
+
+  const later = useCallback((fn: () => void, ms: number) => {
+    const id = setTimeout(fn, ms);
+    timers.current.push(id);
+  }, []);
 
   const toast = useCallback((message: string, type: ToastType = 'info') => {
     const id = Math.random().toString(36).slice(2);
-    setToasts(prev => [...prev.slice(-4), { id, message, type }]); // max 5
-    setTimeout(() => {
+    setToasts(prev => [...prev.slice(-4), { id, message, type, leaving: false }]); // max 5
+    // Start the 250ms exit animation first, then unmount - never vanish abruptly.
+    later(() => {
+      setToasts(prev => prev.map(t => t.id === id ? { ...t, leaving: true } : t));
+    }, 4250);
+    later(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 4500);
-  }, []);
+  }, [later]);
 
-  const remove = (id: string) => setToasts(prev => prev.filter(t => t.id !== id));
+  const remove = useCallback((id: string) => {
+    setToasts(prev => prev.map(t => t.id === id ? { ...t, leaving: true } : t));
+    later(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 250);
+  }, [later]);
 
   return (
     <ToastContext.Provider value={{ toast }}>
@@ -71,7 +90,9 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               borderRadius: 16,
               backdropFilter: 'blur(20px) saturate(180%)',
               boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
-              animation: 'slideInRight 0.3s cubic-bezier(0.4,0,0.2,1)',
+              animation: t.leaving
+                ? 'toastOut 0.25s ease-in forwards'
+                : 'slideInRight 0.3s cubic-bezier(0.4,0,0.2,1)',
               pointerEvents: 'all',
             }}>
               <span style={{ color: c.icon, flexShrink: 0, marginTop: 2 }}>{icons[t.type]}</span>

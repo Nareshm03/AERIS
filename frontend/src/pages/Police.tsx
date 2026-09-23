@@ -6,9 +6,8 @@ import Nav from '../components/Nav';
 import TrafficLight from '../components/TrafficLight';
 import InteractiveMap from '../components/InteractiveMap';
 import { useToast } from '../components/Toast';
-import { LiveBadge, AnimatedProgress, StatusPulse, AnimatedCounter } from '../components/LiveIndicators';
+import { LiveBadge, AnimatedProgress, StatusPulse, AnimatedCounter, MetricValue } from '../components/LiveIndicators';
 import { MetricCard } from '../components/EnhancedCard';
-import EmptyState from '../components/EmptyState';
 import CopyableText from '../components/CopyableText';
 import { useStaircaseLoading, DashboardSkeleton } from '../components/SkeletonLoader';
 import Tooltip from '../components/Tooltip';
@@ -137,6 +136,14 @@ const Police: React.FC = () => {
   const redCount       = state.signals.filter(s => s.color === 'RED').length;
   const yellowCount    = state.signals.filter(s => s.color === 'YELLOW').length;
   const overrideCount  = state.signals.filter(s => s.manualOverride).length;
+  const corridorActive = activeSessions.length > 0 && greenCount > 0;
+  const contestedCount = state.signals.filter(s => s.contested).length;
+  // Junctions on any active route - corridor-relevant signals get emphasis.
+  const corridorJunctions = new Set<string>();
+  activeSessions.forEach(s => s.route.forEach(n => corridorJunctions.add(n)));
+  // Monitored road segments, derived from the same adjacency the dropdowns use.
+  const segmentKeys = new Set<string>();
+  Object.entries(CITY_GRAPH_JUNCTIONS).forEach(([a, bs]) => bs.forEach(b => segmentKeys.add([a, b].sort().join('|'))));
 
   return (
     <>
@@ -145,16 +152,20 @@ const Police: React.FC = () => {
 
         <div className="page-header">
           <div>
+            <div style={{ fontSize: '0.68rem', fontWeight: 800, letterSpacing: '2px', color: activeSessions.length > 0 ? 'var(--c-red-bright)' : 'var(--green-dark)', marginBottom: 4 }}>
+              {activeSessions.length > 0
+                ? `● EMERGENCY ACTIVE · ${activeSessions.length} AMBULANCE${activeSessions.length > 1 ? 'S' : ''}${corridorActive ? ' · CORRIDOR ACTIVE' : ''}`
+                : '● NO ACTIVE EMERGENCY'}
+            </div>
             <h1 className="page-title">Traffic Control Center</h1>
             <p className="page-subtitle">Signal monitoring · Manual override · Multi-ambulance awareness</p>
           </div>
           {activeSessions.length > 0 ? (
             <div className="emergency-banner animate-fade-in" style={{ padding: '10px 16px', position: 'relative', overflow: 'hidden' }}>
-              <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, transparent, rgba(239,68,68,0.1), transparent)', animation: 'shimmer 2s infinite' }} />
               <AlertTriangle size={16} color="var(--c-red)" style={{ position: 'relative', zIndex: 1 }} />
               <div style={{ position: 'relative', zIndex: 1 }}>
                 <div className="font-semibold text-sm" style={{ color: 'var(--c-red-bright)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <AnimatedCounter value={activeSessions.length} color="var(--c-red-bright)" /> ACTIVE EMERGENCY{activeSessions.length > 1 ? ' (MULTIPLE)' : ''}
+                  <MetricValue value={activeSessions.length} color="var(--c-red-bright)" /> ACTIVE EMERGENCY{activeSessions.length > 1 ? ' (MULTIPLE)' : ''}
                   <LiveBadge variant="red" />
                 </div>
                 <div className="text-xs text-muted">
@@ -167,14 +178,49 @@ const Police: React.FC = () => {
           )}
         </div>
 
+        {/* Corridor summary: emergency-first operational picture */}
+        {activeSessions.length > 0 ? (
+          <div className="card mb-4 animate-fade-in" style={{ borderColor: 'rgba(255,59,92,0.3)' }}>
+            <div className="card-header">
+              <div className="card-title">
+                <div className="card-title-icon" style={{ background: 'var(--red-light)', color: 'var(--red)' }}><AlertTriangle size={16} /></div>
+                Emergency Corridor
+              </div>
+              <span className={`status-badge ${contestedCount > 0 ? 'badge-yellow' : 'badge-green'} text-xs`}>
+                {contestedCount > 0 ? `⚠ CONTESTED ×${contestedCount}` : corridorActive ? 'GREEN CORRIDOR' : 'NORMAL'}
+              </span>
+            </div>
+            <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {activeSessions.map(s => {
+                const left = s.route.length - 1 - s.currentNodeIndex;
+                return (
+                  <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                    <CopyableText value={s.rid} className="mono font-semibold" style={{ color: 'var(--c-red-bright)', fontSize: '0.9rem' }} />
+                    <span className="text-xs text-muted">Destination: <strong style={{ color: 'var(--text-primary)' }}>{s.hospital.name}</strong></span>
+                    <span className="text-xs text-muted">Route: {s.route.length} nodes</span>
+                    <span className="text-xs text-muted">Signals prioritized: <strong style={{ color: 'var(--green-dark)' }}>{greenCount}</strong></span>
+                    <span className="text-xs text-muted">ETA: <strong className="mono" style={{ color: 'var(--c-yellow)' }}>{left * 2}m</strong></span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="card mb-4" style={{ padding: '12px 18px', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--green)' }} />
+            <span style={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '1px', color: 'var(--green-dark)' }}>SYSTEM MONITORING</span>
+            <span className="text-xs text-muted">No active emergency corridor{overrideCount === 0 ? ' · No active overrides — automatic control' : ` · ${overrideCount} manual override${overrideCount > 1 ? 's' : ''} active`}.</span>
+          </div>
+        )}
+
         {/* Stats */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1.25rem', marginBottom: '1.5rem' }}>
-          <MetricCard label="Signals" value={state.signals.length} icon={<Activity size={22} />} color="var(--blue)" />
-          <MetricCard label="Green" value={greenCount} icon={<div style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--green)', boxShadow: '0 0 12px var(--green)' }} />} color="var(--green)" />
-          <MetricCard label="Red" value={redCount} icon={<div style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--red)', boxShadow: '0 0 12px var(--red)' }} />} color="var(--red)" />
-          <MetricCard label="Yellow" value={yellowCount} icon={<div style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--orange)', boxShadow: '0 0 12px var(--orange)' }} />} color="var(--orange)" />
-          <MetricCard label="Overrides" value={overrideCount} icon={<ShieldAlert size={22} />} color={overrideCount > 0 ? 'var(--orange)' : 'var(--text-tertiary)'} />
-          <MetricCard label="Ambulances" value={activeSessions.length} icon={<AlertTriangle size={22} />} color={activeSessions.length > 0 ? 'var(--red)' : 'var(--green)'} />
+          <MetricCard label="Signals" value={state.signals.length} subtitle="MONITORED" icon={<Activity size={22} />} color="var(--blue)" />
+          <MetricCard label="Green" value={greenCount} subtitle={corridorActive ? 'PRIORITY ACTIVE' : 'STANDBY'} icon={<div style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--green)', boxShadow: '0 0 12px var(--green)' }} />} color="var(--green)" />
+          <MetricCard label="Red" value={redCount} subtitle="NORMAL STATE" icon={<div style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--red)', boxShadow: '0 0 12px var(--red)' }} />} color="var(--red)" />
+          <MetricCard label="Yellow" value={yellowCount} subtitle="ATTENTION" icon={<div style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--orange)', boxShadow: '0 0 12px var(--orange)' }} />} color="var(--orange)" />
+          <MetricCard label="Overrides" value={overrideCount} subtitle={overrideCount > 0 ? 'MANUAL' : 'AUTOMATIC'} icon={<ShieldAlert size={22} />} color={overrideCount > 0 ? 'var(--orange)' : 'var(--text-tertiary)'} />
+          <MetricCard label="Ambulances" value={activeSessions.length} subtitle={activeSessions.length > 0 ? 'ACTIVE' : 'STANDBY'} icon={<AlertTriangle size={22} />} color={activeSessions.length > 0 ? 'var(--red)' : 'var(--green)'} />
         </div>
 
         {/* ── Active Sessions (multi-ambulance) ── */}
@@ -191,7 +237,7 @@ const Police: React.FC = () => {
                 const nodesLeft = session.route.length - 1 - session.currentNodeIndex;
                 const eta = nodesLeft * 2;
                 return (
-                  <div key={session.rid} style={{
+                  <div key={session.id} style={{
                     display: 'flex', alignItems: 'center', padding: '12px 14px',
                     background: 'rgba(239,68,68,0.08)', borderRadius: 16,
                     border: '1px solid rgba(239,68,68,0.25)',
@@ -199,7 +245,7 @@ const Police: React.FC = () => {
                   }}>
                     <div>
                       <CopyableText value={session.rid} className="mono font-semibold" style={{ color: 'var(--c-red-bright)', fontSize: '0.95rem' }} />
-                      <div className="text-xs text-muted">{session.routeName}</div>
+                      <div className="text-xs text-muted">{session.routeName} · → {session.hospital.name}</div>
                     </div>
                     <div className="text-xs" style={{ flex: 1 }}>
                       <div className="text-muted mb-1">Route Progress</div>
@@ -266,17 +312,23 @@ const Police: React.FC = () => {
           <div className="card-body">
             <p className="text-xs text-muted mb-3">Manual overrides auto-release after 30s. AERIS resumes corridor control automatically.</p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
-            {state.signals.map((sig, i) => (
+            {state.signals.map(sig => {
+              const onRoute = corridorJunctions.has(sig.junction);
+              const corridorSignal = activeSessions.length > 0 && onRoute && sig.color === 'GREEN' && !sig.manualOverride;
+              return (
               <div key={sig.id} className="card" style={{
                 padding: '1.25rem',
                 background: sig.color === 'GREEN' ? 'linear-gradient(135deg, var(--green-light), var(--bg-card))' : 'var(--bg-card)',
-                border: `1px solid ${sig.color === 'GREEN' ? 'rgba(52,199,89,0.25)' : sig.manualOverride ? 'rgba(255,149,0,0.25)' : 'var(--border-light)'}`,
+                border: corridorSignal
+                  ? '2px solid rgba(52,199,89,0.5)'
+                  : `1px solid ${sig.color === 'GREEN' ? 'rgba(52,199,89,0.25)' : sig.manualOverride ? 'rgba(255,149,0,0.25)' : 'var(--border-light)'}`,
+                boxShadow: corridorSignal ? '0 0 16px rgba(52,199,89,0.22)' : undefined,
+                opacity: activeSessions.length > 0 && !onRoute ? 0.6 : 1,
                 display: 'flex',
                 flexDirection: 'column',
                 gap: '1rem',
                 alignItems: 'center',
                 position: 'relative',
-                animationDelay: `${i * 0.05}s`,
               }}>
                 {sig.manualOverride && (
                   <span style={{ position: 'absolute', top: 10, right: 10, fontSize: '0.65rem', padding: '3px 8px', background: 'var(--orange-light)', color: 'var(--orange)', borderRadius: 8, fontWeight: 600 }}>MANUAL</span>
@@ -308,7 +360,8 @@ const Police: React.FC = () => {
                   ))}
                 </div>
               </div>
-            ))}
+              );
+            })}
             </div>
           </div>
         </div>
@@ -322,19 +375,16 @@ const Police: React.FC = () => {
             </div>
           </div>
           <div className="card-body">
-            <p className="text-xs text-muted mb-3">
-              Reporting a blocked segment immediately recalculates the route for any active ambulance currently crossing it — Dijkstra reruns from its current position, avoiding the block.
-            </p>
-            <div className="flex items-center gap-2 flex-wrap" style={{ marginBottom: '1rem' }}>
+            <div className="flex items-center gap-2 flex-wrap" style={{ marginBottom: '0.75rem' }}>
               <select value={fromNode} onChange={e => {
                 const next = e.target.value;
                 setFromNode(next);
                 setToNode(CITY_GRAPH_JUNCTIONS[next][0]);
-              }} style={selectStyle}>
+              }} style={selectStyle} aria-label="Blocked segment start junction">
                 {ALL_JUNCTIONS.map(j => <option key={j} value={j}>{j}</option>)}
               </select>
-              <span className="text-muted">↔</span>
-              <select value={toNode} onChange={e => setToNode(e.target.value)} style={selectStyle}>
+              <span className="text-muted">→</span>
+              <select value={toNode} onChange={e => setToNode(e.target.value)} style={selectStyle} aria-label="Blocked segment end junction">
                 {CITY_GRAPH_JUNCTIONS[fromNode].map(j => <option key={j} value={j}>{j}</option>)}
               </select>
               <button
@@ -348,21 +398,28 @@ const Police: React.FC = () => {
             </div>
 
             {blocked.length === 0 ? (
-              <EmptyState
-                icon={Construction}
-                title="No roads currently blocked"
-                subtitle="Report a blocked segment above and any active ambulance crossing it will be rerouted automatically."
-              />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'rgba(52,199,89,0.07)', borderRadius: 12, border: '1px solid rgba(52,199,89,0.2)' }}>
+                <span style={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.8px', color: 'var(--green-dark)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  ✓ NETWORK CLEAR
+                </span>
+                <span className="text-xs text-muted">No active roadblocks · {segmentKeys.size} monitored segments available.</span>
+              </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ fontSize: '0.68rem', fontWeight: 800, letterSpacing: '1px', color: 'var(--orange-dark)' }}>
+                  ⚠ ACTIVE ROADBLOCKS ({blocked.length}) — ROUTES RECALCULATED AUTOMATICALLY
+                </div>
                 {blocked.map(([a, b]) => (
                   <div key={`${a}|${b}`} style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
                     padding: '10px 14px', background: 'rgba(255,149,0,0.08)', borderRadius: 12,
                     border: '1px solid rgba(255,149,0,0.25)',
                   }}>
-                    <span className="text-sm font-semibold" style={{ color: 'var(--orange)' }}>{a} ↔ {b}</span>
-                    <button onClick={() => handleClearRoadblock(a, b)} className="btn-sig-g" style={{ padding: '4px 12px', fontSize: '0.75rem' }}>
+                    <span>
+                      <span className="text-sm font-semibold" style={{ color: 'var(--orange-dark)', display: 'block' }}>{a} ↔ {b}</span>
+                      <span className="text-xs text-muted">Status: ACTIVE</span>
+                    </span>
+                    <button onClick={() => handleClearRoadblock(a, b)} className="btn-sig-g" style={{ padding: '4px 12px', fontSize: '0.75rem', flexShrink: 0 }}>
                       Reopen
                     </button>
                   </div>

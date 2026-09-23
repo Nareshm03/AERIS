@@ -32,7 +32,9 @@ const TrafficLight: React.FC<Props> = ({ color, name, size = 'md' }) => {
         background: currentColor.bg,
         border: `1.5px solid ${currentColor.border}`,
         borderRadius: 100,
-        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        // Scoped color-only transition: a RED ↔ GREEN flip crossfades in
+        // ~0.3s with no pulse, bounce, or layout-property animation.
+        transition: 'background-color 0.3s ease-out, border-color 0.3s ease-out, box-shadow 0.3s ease-out',
         boxShadow: `0 0 0 4px ${currentColor.glow}, 0 2px 8px rgba(0,0,0,0.06)`,
       }}>
         {/* Animated Dot */}
@@ -42,7 +44,6 @@ const TrafficLight: React.FC<Props> = ({ color, name, size = 'md' }) => {
           borderRadius: '50%',
           background: currentColor.border,
           boxShadow: `0 0 8px ${currentColor.border}`,
-          animation: 'pulse-dot 2s ease-in-out infinite',
         }} />
         
         {/* Status Text */}

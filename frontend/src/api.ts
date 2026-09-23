@@ -19,7 +19,7 @@ export interface Hospital {
 }
 
 export interface AmbulanceSession {
-  rid: string; driverId: string;
+  id: string; rid: string; driverId: string;
   route: string[]; routeName: string;
   currentNodeIndex: number;
   currentGPS: [number, number];
@@ -169,7 +169,18 @@ export const handleApiError = (error: any): string => {
 export const loginUser = async (username: string, password: string): Promise<{ token: string; user: AuthUser }> => {
   try {
     const res = await http.post('/auth/login', { username, password });
-    return res.data;
+    const { token, user } = res.data;
+    // Normalize to the canonical AuthUser shape: /auth/login returns the
+    // user as {id, ...} while /auth/me returns {sub, ...}. Map once here so
+    // fresh login and session restore expose the same identity field
+    // (sub) to every consumer - e.g. Driver's own-session lookup.
+    const normalized: AuthUser = {
+      sub: user.sub ?? user.id,
+      name: user.name,
+      role: user.role,
+      username: user.username ?? username,
+    };
+    return { token, user: normalized };
   } catch (error) {
     throw new Error(handleApiError(error));
   }
@@ -233,7 +244,7 @@ export const updateHospitalCapacity = async (hospitalId: string, availableBeds: 
 };
 
 export interface IncidentHistoryEntry {
-  rid: string;
+  id: string; rid: string;
   status: 'arrived' | 'cancelled';
   hospital: { id: string; name: string; node: string };
   patient: { condition: string; severity: 'critical' | 'serious' | 'stable'; requiredDepartment: string; notes: string };

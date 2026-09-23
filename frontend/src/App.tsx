@@ -2,7 +2,6 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './components/Toast';
-import LiquidGlassTracker from './components/LiquidGlassTracker';
 import Login from './pages/Login';
 import Driver from './pages/Driver';
 import Police from './pages/Police';
@@ -23,7 +22,6 @@ function App() {
     <BrowserRouter>
       <AuthProvider>
         <ToastProvider>
-          <LiquidGlassTracker />
           <Routes>
             <Route path="/" element={<Login />} />
             <Route path="/driver"   element={<Guard roles={['driver']}><Driver /></Guard>} />

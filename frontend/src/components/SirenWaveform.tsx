@@ -5,9 +5,13 @@ interface Props {
   frequency?: number; // Hz to display
 }
 
+// Frame budget for the active waveform: ~15fps is plenty for a siren
+// indicator and avoids a full-rate canvas loop on a dashboard panel.
+const ACTIVE_FRAME_MS = 66;
+
 const SirenWaveform: React.FC<Props> = ({ active, frequency = 0 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animRef = useRef<number>(0);
+  const rafRef = useRef<number>(0);
   const tRef = useRef(0);
 
   useEffect(() => {
@@ -17,53 +21,75 @@ const SirenWaveform: React.FC<Props> = ({ active, frequency = 0 }) => {
     const W = canvas.width;
     const H = canvas.height;
 
-    const draw = () => {
+    const drawStatic = () => {
+      // Inactive: one flat line, drawn once - no animation loop.
       ctx.clearRect(0, 0, W, H);
-
-      if (!active) {
-        // Flat line with noise
-        ctx.beginPath();
-        ctx.strokeStyle = '#2a3958';
-        ctx.lineWidth = 1.5;
-        ctx.moveTo(0, H / 2);
-        for (let x = 0; x < W; x++) {
-          const noise = (Math.random() - 0.5) * 2;
-          ctx.lineTo(x, H / 2 + noise);
-        }
-        ctx.stroke();
-      } else {
-        // Vibrant siren waveform
-        const amp = H * 0.35;
-        const freq = Math.max(0.02, frequency / 30000);
-
-        // Glow effect
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = '#10b981';
-
-        ctx.beginPath();
-        ctx.lineWidth = 2;
-        const grad = ctx.createLinearGradient(0, 0, W, 0);
-        grad.addColorStop(0, '#3b82f6');
-        grad.addColorStop(0.5, '#10b981');
-        grad.addColorStop(1, '#06b6d4');
-        ctx.strokeStyle = grad;
-
-        for (let x = 0; x < W; x++) {
-          const t = tRef.current * 0.05;
-          const y = H / 2 + amp * Math.sin(freq * x * 2 * Math.PI + t) * Math.sin(t * 0.3);
-          if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        }
-        ctx.stroke();
-        ctx.shadowBlur = 0;
-
-        tRef.current++;
-      }
-
-      animRef.current = requestAnimationFrame(draw);
+      ctx.beginPath();
+      ctx.strokeStyle = '#2a3958';
+      ctx.lineWidth = 1.5;
+      ctx.moveTo(0, H / 2);
+      ctx.lineTo(W, H / 2);
+      ctx.stroke();
     };
 
-    draw();
-    return () => cancelAnimationFrame(animRef.current);
+    if (!active) {
+      tRef.current = 0;
+      drawStatic();
+      return;
+    }
+
+    // Reduced motion: draw one static frame per data change (this effect
+    // re-runs when frequency changes) instead of an animation loop. The
+    // siren frequency number alongside always carries the information.
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      tRef.current++;
+      drawOnce();
+      return;
+    }
+
+    let lastFrame = 0;
+    // Function declaration (hoisted) so the reduced-motion early return
+    // above can use it before this point in the effect body.
+    function drawOnce() {
+      // Vibrant siren waveform (same visual meaning as before)
+      const amp = H * 0.35;
+      const freq = Math.max(0.02, frequency / 30000);
+
+      // Glow effect
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = '#10b981';
+
+      ctx.clearRect(0, 0, W, H);
+      ctx.beginPath();
+      ctx.lineWidth = 2;
+      const grad = ctx.createLinearGradient(0, 0, W, 0);
+      grad.addColorStop(0, '#3b82f6');
+      grad.addColorStop(0.5, '#10b981');
+      grad.addColorStop(1, '#06b6d4');
+      ctx.strokeStyle = grad;
+
+      for (let x = 0; x < W; x++) {
+        const t = tRef.current * 0.05;
+        const y = H / 2 + amp * Math.sin(freq * x * 2 * Math.PI + t) * Math.sin(t * 0.3);
+        if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      tRef.current++;
+    }
+
+    const loop = (now: number) => {
+      // Throttle redraws to the frame budget; the rAF loop itself only
+      // exists while active and is cancelled on cleanup below.
+      if (now - lastFrame >= ACTIVE_FRAME_MS) {
+        lastFrame = now;
+        drawOnce();
+      }
+      rafRef.current = requestAnimationFrame(loop);
+    };
+    rafRef.current = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(rafRef.current);
   }, [active, frequency]);
 
   return (

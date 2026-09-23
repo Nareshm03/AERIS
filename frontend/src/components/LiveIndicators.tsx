@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { Radio } from 'lucide-react';
 
 // Pulsing LIVE badge
 export const LiveBadge: React.FC<{ variant?: 'red' | 'green' | 'blue' }> = ({ variant = 'red' }) => {
@@ -60,15 +59,42 @@ export const AnimatedCounter: React.FC<{
   }, [value]);
   
   return (
-    <span style={{ 
-      color, 
-      fontWeight: 800, 
+    <span style={{
+      color,
+      fontWeight: 800,
       fontSize: '2.5rem',
       fontFamily: 'SF Mono, monospace',
       transition: 'color 0.3s ease',
       ...style
     }}>
       {display.toFixed(decimals)}{suffix}
+    </span>
+  );
+};
+
+// Static metric value - same visual styling as AnimatedCounter but updates
+// instantly with no rolling animation. Use for slow-changing KPIs (speed,
+// fuel, confidence, counts) where the roll is pure churn; keep
+// AnimatedCounter only for ETA-style figures where motion aids reading.
+export const MetricValue: React.FC<{
+  value: number;
+  suffix?: string;
+  color?: string;
+  decimals?: number;
+  style?: React.CSSProperties;
+}> = ({
+  value, suffix = '', color = 'var(--text-primary)', decimals = 0, style = {}
+}) => {
+  return (
+    <span style={{
+      color,
+      fontWeight: 800,
+      fontSize: '2.5rem',
+      fontFamily: 'SF Mono, monospace',
+      transition: 'color 0.3s ease',
+      ...style
+    }}>
+      {value.toFixed(decimals)}{suffix}
     </span>
   );
 };
@@ -102,14 +128,7 @@ export const AnimatedProgress: React.FC<{
           borderRadius: height / 2,
           transition: 'width 1s cubic-bezier(0.4, 0, 0.2, 1)',
           boxShadow: `0 0 12px ${color}40`,
-          position: 'relative',
-          overflow: 'hidden'
         }}>
-          <div style={{
-            position: 'absolute', inset: 0,
-            background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent)',
-            animation: 'shimmer 2s infinite'
-          }} />
         </div>
       </div>
     </div>
@@ -154,58 +173,6 @@ export const CircularProgress: React.FC<{
   );
 };
 
-// Real-time metric card with animation
-export const LiveMetricCard: React.FC<{
-  label: string;
-  value: number | string;
-  suffix?: string;
-  icon?: React.ReactNode;
-  color?: string;
-  trend?: 'up' | 'down' | 'neutral';
-}> = ({ label, value, suffix = '', icon, color = 'var(--blue)', trend }) => {
-  const [isUpdating, setIsUpdating] = useState(false);
-  
-  useEffect(() => {
-    setIsUpdating(true);
-    const timer = setTimeout(() => setIsUpdating(false), 600);
-    return () => clearTimeout(timer);
-  }, [value]);
-  
-  return (
-    <div className="card" style={{
-      padding: '1.25rem',
-      transition: 'all 0.3s ease',
-      transform: isUpdating ? 'scale(1.02)' : 'scale(1)',
-      boxShadow: isUpdating ? `0 8px 24px ${color}20` : undefined
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', letterSpacing: '0.5px', textTransform: 'uppercase' }}>
-          {label}
-        </span>
-        {icon && <div style={{ color, opacity: 0.8 }}>{icon}</div>}
-      </div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-        <span style={{ 
-          fontSize: '2.25rem', fontWeight: 800, color,
-          fontFamily: typeof value === 'number' ? 'SF Mono, monospace' : 'inherit',
-          transition: 'color 0.3s ease'
-        }}>
-          {value}
-        </span>
-        {suffix && <span style={{ fontSize: '1rem', color: 'var(--text-tertiary)', fontWeight: 600 }}>{suffix}</span>}
-      </div>
-      {trend && (
-        <div style={{ 
-          marginTop: 8, fontSize: '0.7rem', fontWeight: 600,
-          color: trend === 'up' ? 'var(--green)' : trend === 'down' ? 'var(--red)' : 'var(--text-tertiary)'
-        }}>
-          {trend === 'up' ? '↗ Increasing' : trend === 'down' ? '↘ Decreasing' : '→ Stable'}
-        </div>
-      )}
-    </div>
-  );
-};
-
 // Pulsing status indicator
 export const StatusPulse: React.FC<{ 
   status: 'active' | 'idle' | 'warning' | 'error';
@@ -244,41 +211,3 @@ export const StatusPulse: React.FC<{
     </div>
   );
 };
-
-// Streaming data indicator
-export const StreamIndicator: React.FC<{ connected: boolean }> = ({ connected }) => (
-  <div style={{
-    display: 'inline-flex', alignItems: 'center', gap: 6,
-    padding: '6px 12px', borderRadius: 8,
-    background: connected ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
-    border: `1.5px solid ${connected ? '#22c55e' : '#ef4444'}40`
-  }}>
-    <Radio size={14} color={connected ? '#22c55e' : '#ef4444'} 
-      style={{ animation: connected ? 'pulse 2s ease-in-out infinite' : 'none' }} />
-    <span style={{ 
-      fontSize: '0.7rem', fontWeight: 700, 
-      color: connected ? '#22c55e' : '#ef4444',
-      letterSpacing: '0.3px'
-    }}>
-      {connected ? 'STREAMING' : 'DISCONNECTED'}
-    </span>
-  </div>
-);
-
-// Add keyframes to global styles
-const style = document.createElement('style');
-style.textContent = `
-  @keyframes pulse-glow {
-    0%, 100% { box-shadow: 0 0 8px rgba(239,68,68,0.3); }
-    50% { box-shadow: 0 0 16px rgba(239,68,68,0.6); }
-  }
-  @keyframes shimmer {
-    0% { transform: translateX(-100%); }
-    100% { transform: translateX(100%); }
-  }
-  @keyframes pulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.7; transform: scale(1.1); }
-  }
-`;
-document.head.appendChild(style);

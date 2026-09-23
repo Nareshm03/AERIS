@@ -57,6 +57,7 @@ AERIS/
 ### Prerequisites
 
 - Node.js 18+ and npm
+- Python 3.10+ (for the detection microservice)
 - Modern browser (Chrome/Edge/Firefox)
 
 ### Installation
@@ -73,32 +74,72 @@ npm install
 # Install frontend dependencies
 cd ../frontend
 npm install
+
+# Install detection-service dependencies (YOLO + FFT audio analysis)
+cd ../backend
+python -m pip install -r requirements.txt
+```
+
+### Environment
+
+```bash
+# Required: the backend refuses to boot without JWT_SECRET
+copy backend\.env.example backend\.env
+# Then set JWT_SECRET inside backend\.env - generate with:
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
 ### Running the Application
 
-**Terminal 1 - Backend:**
+On Windows, `start-aeris.bat` launches all four services (checks for
+`backend\.env` first). Manually, one terminal per service:
+
+**Terminal 1 - Detection service:**
+```bash
+cd backend
+python -m uvicorn app:app --host 0.0.0.0 --port 8001
+# Health: http://localhost:8001/health
+```
+
+**Terminal 2 - Signal engine:**
+```bash
+cd backend
+npm run dev:signals
+# Health: http://localhost:4001/health
+```
+
+**Terminal 3 - Backend:**
 ```bash
 cd backend
 npm run dev
 # Server runs on http://localhost:4000
 ```
 
-**Terminal 2 - Frontend:**
+**Terminal 4 - Frontend:**
 ```bash
 cd frontend
 npm run dev
 # App runs on http://localhost:5173
 ```
 
+Run `diagnose.bat` (Windows) or `diagnose.sh` to verify all four services.
+
 ### Login Credentials
 
-| Role | Username | Password |
-|------|----------|----------|
-| 🚑 Driver | `driver` | `driver123` |
-| 👮 Police | `police` | `police123` |
-| 🏥 Hospital | `hospital` | `hospital123` |
-| 👨‍💼 Admin | `admin` | `admin123` |
+| Role | Username | Password | Notes |
+|------|----------|----------|-------|
+| 🚑 Driver | `driver` | `driver123` | Dispatched from Indiranagar Metro |
+| 🚑 Driver | `driver2` | `driver123` | Dispatched from Silk Board Junction |
+| 🚑 Driver | `driver3` | `driver123` | Dispatched from Indiranagar Metro |
+| 👮 Police | `police` | `police123` | |
+| 🏥 Hospital | `hospital` | `hospital123` | Manipal Hospital staff |
+| 🏥 Hospital | `hospital2` | `hospital123` | St. John's Medical College staff |
+| 🏥 Hospital | `hospital3` | `hospital123` | Victoria Hospital staff |
+| 👨‍💼 Admin | `admin` | `admin123` | |
+
+Each hospital login can only manage bed capacity and acknowledge/prep
+patients for **their own** hospital - a `hospital2` login gets a 403 if it
+tries to touch Manipal's data, for example. Admin can manage all three.
 
 ---
 

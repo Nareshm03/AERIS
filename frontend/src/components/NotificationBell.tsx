@@ -69,6 +69,8 @@ const NotificationBell: React.FC = () => {
       <button
         onClick={handleToggle}
         aria-label="Notifications"
+        aria-haspopup="true"
+        aria-expanded={open}
         style={{
           position: 'relative', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)',
           borderRadius: 10, width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -89,7 +91,10 @@ const NotificationBell: React.FC = () => {
       </button>
 
       {open && (
-        <div style={{
+        <div
+          role="region"
+          aria-label="Recent activity notifications"
+          style={{
           position: 'absolute', top: 'calc(100% + 10px)', right: 0, width: 320, maxHeight: 400,
           background: 'var(--bg-card, #12182b)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 16,
           boxShadow: '0 16px 48px rgba(0,0,0,0.4)', zIndex: 9998, overflow: 'hidden',

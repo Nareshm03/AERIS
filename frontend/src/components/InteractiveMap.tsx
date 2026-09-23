@@ -37,6 +37,12 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({
   const hospitalMarkersRef = useRef<Map<string, L.Marker>>(new Map());
   const [mapReady, setMapReady] = useState(false);
   const [selectedAmbulance, setSelectedAmbulance] = useState<string | null>(null);
+  // Manual-interaction guard: while the user is dragging/zooming, automatic
+  // follow pauses so it never yanks the viewport back mid-gesture. Resumes
+  // shortly after the gesture ends (existing always-follow intent preserved).
+  const userHoldRef = useRef(false);
+  const programmaticRef = useRef(false);
+  const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Custom ambulance icon
   const ambulanceIcon = L.divIcon({
@@ -121,6 +127,22 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({
     mapRef.current = map;
     setMapReady(true);
 
+    // Distinguish user gestures from our own programmatic pans: a panTo we
+    // trigger sets programmaticRef first, so its movestart is ignored.
+    map.on('movestart', () => {
+      if (programmaticRef.current) { programmaticRef.current = false; return; }
+      userHoldRef.current = true;
+      if (resumeTimerRef.current) { clearTimeout(resumeTimerRef.current); resumeTimerRef.current = null; }
+    });
+    map.on('moveend', () => {
+      // Resume follow shortly after the gesture settles (covers inertia).
+      if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+      resumeTimerRef.current = setTimeout(() => {
+        userHoldRef.current = false;
+        resumeTimerRef.current = null;
+      }, 2500);
+    });
+
     // Add real hospital markers (Section 6: multiple real hospitals, not
     // a single hardcoded destination)
     const REAL_HOSPITALS: { name: string; lat: number; lng: number; address: string }[] = [
@@ -148,6 +170,7 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({
     });
 
     return () => {
+      if (resumeTimerRef.current) { clearTimeout(resumeTimerRef.current); resumeTimerRef.current = null; }
       map.remove();
       mapRef.current = null;
     };
@@ -332,9 +355,13 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({
         trail.setLatLngs(trailCoords);
       }
 
-      // Center map on ambulance if requested and it's the first/selected one
-      if (centerOnAmbulance && (index === 0 || session.rid === selectedAmbulance)) {
-        map.setView([lat, lng], map.getZoom(), { animate: true, duration: 0.5 });
+      // Follow the ambulance while requested - panTo glides without
+      // touching the zoom level, and pauses while the user is interacting.
+      // Reduced-motion users get an instant jump: same information, no glide.
+      if (centerOnAmbulance && !userHoldRef.current && (index === 0 || session.rid === selectedAmbulance)) {
+        const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        programmaticRef.current = true;
+        map.panTo([lat, lng], reduced ? { animate: false } : { animate: true, duration: 0.5 });
       }
     });
 

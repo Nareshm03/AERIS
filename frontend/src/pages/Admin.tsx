@@ -296,7 +296,7 @@ const Admin: React.FC = () => {
                   </thead>
                   <tbody>
                     {all.map(s => (
-                      <tr key={s.rid}>
+                      <tr key={s.id}>
                         <td className="mono font-semibold" style={{ color: s.status === 'active' ? 'var(--c-red-bright)' : 'var(--text-secondary)', fontSize: '0.82rem' }}><CopyableText value={s.rid} /></td>
                         <td className="text-xs text-muted">{s.routeName.split(' (')[0]}</td>
                         <td>
@@ -502,7 +502,7 @@ const Admin: React.FC = () => {
                   </thead>
                   <tbody>
                     {history.slice(0, 15).map(h => (
-                      <tr key={h.rid}>
+                      <tr key={h.id}>
                         <td className="mono font-semibold"><CopyableText value={h.rid} /></td>
                         <td>{h.hospital.name}</td>
                         <td style={{ textTransform: 'capitalize' }}>{h.patient.severity}</td>

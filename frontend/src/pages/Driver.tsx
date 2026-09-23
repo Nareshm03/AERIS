@@ -10,7 +10,7 @@ import TrafficLight from '../components/TrafficLight';
 import InteractiveMap from '../components/InteractiveMap';
 import SirenWaveform from '../components/SirenWaveform';
 import { useToast } from '../components/Toast';
-import { LiveBadge, AnimatedProgress, StatusPulse, AnimatedCounter } from '../components/LiveIndicators';
+import { LiveBadge, AnimatedProgress, StatusPulse, AnimatedCounter, MetricValue } from '../components/LiveIndicators';
 import { GlassCard } from '../components/EnhancedCard';
 import Tooltip from '../components/Tooltip';
 import { useStaircaseLoading, DashboardSkeleton } from '../components/SkeletonLoader';
@@ -339,6 +339,24 @@ const Driver: React.FC = () => {
 
   const loadStage = useStaircaseLoading(!state);
 
+  // One-shot activation feedback: when the emergency flips to ACTIVE (via
+  // SSE, after the backend confirms), flash the banner once over ~0.5s.
+  // Activation itself is never delayed - this is purely presentational.
+  const [justActivated, setJustActivated] = useState(false);
+  const wasEmergencyRef = useRef(isEmergency);
+  useEffect(() => {
+    if (isEmergency && !wasEmergencyRef.current) {
+      setJustActivated(true);
+      const t = setTimeout(() => setJustActivated(false), 600);
+      wasEmergencyRef.current = true;
+      return () => clearTimeout(t);
+    }
+    wasEmergencyRef.current = isEmergency;
+  }, [isEmergency]);
+
+  const greenCount = state?.signals.filter(s => s.color === 'GREEN').length ?? 0;
+  const signalTotal = state?.signals.length ?? 0;
+
   if (!state) return (
     <>
       <Nav roleName="Ambulance Driver" roleColor="#5D7DA6" connected={connected} />
@@ -350,7 +368,15 @@ const Driver: React.FC = () => {
 
   return (
     <>
-      <Nav roleName="Ambulance Driver" roleColor="#5D7DA6" connected={connected} />
+      <Nav
+        roleName="Ambulance Driver"
+        roleColor="#5D7DA6"
+        connected={connected}
+        meta={[
+          { label: 'Unit', value: <span className="mono">{mySession?.rid ?? 'Standby'}</span>, tone: isEmergency ? 'green' : 'muted' },
+          { label: 'Link', value: connected ? 'SSE CONNECTED' : 'OFFLINE', tone: connected ? 'green' : 'red' },
+        ]}
+      />
       <div className="container animate-fade-up">
 
         {/* SSE Connection Error Banner */}
@@ -373,14 +399,17 @@ const Driver: React.FC = () => {
           </div>
         )}
 
-        {/* ── Header ── */}
+        {/* ── Header: READY vs EMERGENCY ACTIVE ── */}
         <div className="page-header">
           <div>
-            <h1 className="page-title">Driver Console</h1>
+            <div style={{ fontSize: '0.68rem', fontWeight: 800, letterSpacing: '2px', color: isEmergency ? 'var(--c-red-bright)' : '#5C5568', marginBottom: 4 }}>
+              {isEmergency ? '● EMERGENCY ACTIVE' : '○ SYSTEM READY'}
+            </div>
+            <h1 className="page-title">{isEmergency ? `Emergency Active — ${mySession?.rid}` : 'Driver Console'}</h1>
             <p className="page-subtitle">
               {mySession
-                ? <>Active Session: <span className="mono text-blue font-semibold">{mySession.rid}</span> · {mySession.routeName}</>
-                : 'No active session · Select a hospital and activate emergency mode'}
+                ? <><span className="mono text-blue font-semibold">{mySession.hospital.name}</span> · {mySession.routeName}</>
+                : 'No active emergency session — Select destination hospital and activate emergency mode when required.'}
             </p>
           </div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -388,6 +417,11 @@ const Driver: React.FC = () => {
               <button className="btn btn-ghost" onClick={() => setShowRouteSelector(s => !s)} style={{ gap: 6 }}>
                 <Building2 size={16} /> {hospitals.find(h => h.id === selectedHospitalId)?.name || 'Select Hospital'}
               </button>
+            )}
+            {isEmergency && mySession && (
+              <div className="mono" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', padding: '10px 14px', background: 'rgba(0,0,0,0.03)', borderRadius: 12, border: '1px solid var(--border-light)' }}>
+                {mySession.hospital.name}
+              </div>
             )}
             <button
               onClick={handleToggle}
@@ -525,8 +559,10 @@ const Driver: React.FC = () => {
 
         {/* ── Emergency Banner ── */}
         {isEmergency && (
-          <div className="emergency-banner mb-4 animate-fade-in" style={{ position: 'relative', overflow: 'hidden' }}>
-            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, transparent, rgba(239,68,68,0.1), transparent)', animation: 'shimmer 3s infinite' }} />
+          <div className="emergency-banner mb-4 animate-fade-in" style={{
+            position: 'relative', overflow: 'hidden',
+            animation: justActivated ? 'activateFlash 0.5s ease-out, fadeIn 0.4s ease' : 'fadeIn 0.4s ease',
+          }}>
             <LiveBadge variant="red" />
             <span className="font-semibold text-sm" style={{ color: 'var(--c-red-bright)' }}>EMERGENCY ACTIVE</span>
             <span className="text-muted text-sm">· RID: <span className="mono">{mySession?.rid}</span> · Green corridor active · ETA: ~{etaMins} min</span>
@@ -544,14 +580,42 @@ const Driver: React.FC = () => {
               <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                 <LiveBadge variant="green" />
                 <AnimatedProgress value={progress} height={6} showLabel={false} color="var(--green)" />
-                <span className="text-xs font-semibold" style={{ color: 'var(--green)', minWidth: 40 }}>{Math.round(progress)}%</span>
+                <span className="text-xs font-semibold" style={{ color: 'var(--green-dark)', minWidth: 40 }}>{Math.round(progress)}%</span>
               </div>
             ) : null
           }
           glowColor="rgba(93,125,166,0.2)"
         >
-          <InteractiveMap 
-            sessions={state?.sessions || []} 
+          <div style={{ position: 'relative' }}>
+          {isEmergency && mySession && (
+            <div style={{
+              position: 'absolute', top: 12, left: 52, zIndex: 500,
+              // Reserve the top-right legend (~220px) so the chip wraps
+              // instead of sliding underneath it on narrow maps.
+              maxWidth: 'min(600px, calc(100% - 284px))',
+              pointerEvents: 'none', display: 'flex', gap: 8, alignItems: 'stretch', flexWrap: 'wrap',
+              background: 'rgba(255,253,249,0.92)', border: '1px solid rgba(255,59,92,0.3)',
+              borderRadius: 14, padding: '10px 14px',
+              boxShadow: '0 8px 24px rgba(90,60,40,0.12)',
+            }}>
+              <div>
+                <div className="mono" style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--c-red-bright)', lineHeight: 1.2 }}>{mySession.rid}</div>
+                <div style={{ fontSize: '0.62rem', fontWeight: 800, letterSpacing: '1px', color: 'var(--c-red-bright)' }}>EMERGENCY ACTIVE</div>
+              </div>
+              <div style={{ width: 1, background: 'rgba(0,0,0,0.08)' }} />
+              <div>
+                <div style={{ fontWeight: 800, fontSize: '0.95rem', color: '#241F2B', lineHeight: 1.2 }}>ETA ~{etaMins} min</div>
+                <div className="mono" style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>{distanceRemaining.toFixed(1)} km · {mySession.hospital.name}</div>
+              </div>
+              <div style={{ width: 1, background: 'rgba(0,0,0,0.08)' }} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.6px', color: greenCount > 0 ? 'var(--green-dark)' : 'var(--text-tertiary)' }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: greenCount > 0 ? 'var(--green)' : '#c9c2b8' }} />
+                {greenCount > 0 ? `CORRIDOR · ${greenCount} GREEN` : 'CORRIDOR STANDBY'}
+              </div>
+            </div>
+          )}
+          <InteractiveMap
+            sessions={state?.sessions || []}
             signals={state?.signals.map(s => {
               // Map signal junctions to GPS coordinates
               const junctionCoords: Record<string, [number, number]> = {
@@ -571,6 +635,7 @@ const Driver: React.FC = () => {
             showLegend={true}
             height="500px"
           />
+          </div>
         </GlassCard>
 
         <div className="grid-2 stagger">
@@ -587,53 +652,31 @@ const Driver: React.FC = () => {
               glowColor="rgba(93,125,166,0.15)"
             >
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem' }}>
-                {/* Speed */}
-                <div style={{ 
-                  padding: '1.25rem', 
-                  borderRadius: 12, 
-                  background: 'rgba(255,255,255,0.02)',
-                  border: `2px solid ${getSpeedColor()}20`,
-                  position: 'relative',
-                  overflow: 'hidden'
-                }}>
-                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: getSpeedColor(), opacity: 0.6 }} />
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                    <Gauge size={18} color={getSpeedColor()} />
-                    <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>SPEED</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-                    <AnimatedCounter value={Math.round(speed)} suffix="" color={getSpeedColor()} style={{ fontSize: '2rem', fontWeight: 700 }} />
-                    <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>km/h</span>
-                  </div>
-                  <div className="text-xs" style={{ color: 'var(--text-muted)', marginTop: 4 }}>
-                    {speed < 40 ? 'Safe' : speed < 70 ? 'Moderate' : 'High Speed'}
-                  </div>
-                </div>
-
-                {/* Distance Remaining */}
-                <div style={{ 
-                  padding: '1.25rem', 
-                  borderRadius: 12, 
-                  background: 'rgba(255,255,255,0.02)',
-                  border: '2px solid rgba(93,125,166,0.2)'
+                {/* Status — emergency state first */}
+                <div style={{
+                  padding: '1.25rem',
+                  borderRadius: 12,
+                  background: isEmergency ? 'rgba(255,59,92,0.06)' : 'rgba(255,255,255,0.02)',
+                  border: `2px solid ${isEmergency ? 'rgba(255,59,92,0.35)' : isVerified ? 'rgba(52,199,89,0.2)' : 'rgba(0,0,0,0.08)'}`
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                    <MapPin size={18} color="var(--blue)" />
-                    <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>DISTANCE</span>
+                    {isEmergency
+                      ? (isVerified ? <CheckCircle2 size={18} color="var(--c-red-bright)" /> : <XCircle size={18} color="var(--c-red-bright)" />)
+                      : <CheckCircle2 size={18} color="var(--text-tertiary)" />}
+                    <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>STATUS</span>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-                    <AnimatedCounter value={distanceRemaining} suffix="" color="var(--blue)" style={{ fontSize: '2rem', fontWeight: 700 }} decimals={1} />
-                    <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>km</span>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 700, color: isEmergency ? 'var(--c-red-bright)' : 'var(--text-tertiary)', marginBottom: 4 }}>
+                    {isEmergency ? (isVerified ? 'ACTIVE · VERIFIED' : 'ACTIVE · MANUAL') : 'READY'}
                   </div>
                   <div className="text-xs" style={{ color: 'var(--text-muted)', marginTop: 4 }}>
-                    {isEmergency ? 'To hospital' : 'No route'}
+                    {isEmergency ? (isVerified ? 'Sensors active' : 'Override mode') : 'No emergency'}
                   </div>
                 </div>
 
                 {/* Dynamic ETA */}
-                <div style={{ 
-                  padding: '1.25rem', 
-                  borderRadius: 12, 
+                <div style={{
+                  padding: '1.25rem',
+                  borderRadius: 12,
                   background: 'rgba(255,255,255,0.02)',
                   border: '2px solid rgba(251,146,60,0.2)'
                 }}>
@@ -650,6 +693,68 @@ const Driver: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Distance Remaining */}
+                <div style={{
+                  padding: '1.25rem',
+                  borderRadius: 12,
+                  background: 'rgba(255,255,255,0.02)',
+                  border: '2px solid rgba(93,125,166,0.2)'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <MapPin size={18} color="var(--blue)" />
+                    <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>DISTANCE</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                    <MetricValue value={distanceRemaining} suffix="" color="var(--blue)" style={{ fontSize: '2rem', fontWeight: 700 }} decimals={1} />
+                    <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>km</span>
+                  </div>
+                  <div className="text-xs" style={{ color: 'var(--text-muted)', marginTop: 4 }}>
+                    {isEmergency ? 'To hospital' : 'No route'}
+                  </div>
+                </div>
+
+                {/* Speed */}
+                <div style={{ 
+                  padding: '1.25rem', 
+                  borderRadius: 12, 
+                  background: 'rgba(255,255,255,0.02)',
+                  border: `2px solid ${getSpeedColor()}20`,
+                  position: 'relative',
+                  overflow: 'hidden'
+                }}>
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: getSpeedColor(), opacity: 0.6 }} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <Gauge size={18} color={getSpeedColor()} />
+                    <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>SPEED</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                    <MetricValue value={Math.round(speed)} suffix="" color={getSpeedColor()} style={{ fontSize: '2rem', fontWeight: 700 }} />
+                    <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>km/h</span>
+                  </div>
+                  <div className="text-xs" style={{ color: 'var(--text-muted)', marginTop: 4 }}>
+                    {speed < 40 ? 'Safe' : speed < 70 ? 'Moderate' : 'High Speed'}
+                  </div>
+                </div>
+
+                {/* Route — actual active route, not a guess */}
+                <div style={{
+                  padding: '1.25rem',
+                  borderRadius: 12,
+                  background: 'rgba(255,255,255,0.02)',
+                  border: '2px solid rgba(93,125,166,0.2)'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <Route size={18} color="var(--blue)" />
+                    <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>ROUTE</span>
+                  </div>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 700, color: isEmergency ? 'var(--blue)' : 'var(--text-tertiary)', marginBottom: 4 }}>
+                    {mySession ? mySession.routeName.split(' (')[0] : '—'}
+                  </div>
+                  <div className="text-xs" style={{ color: 'var(--text-muted)', marginTop: 4 }}>
+                    {mySession ? `${mySession.route.length} waypoints` : 'No route selected'}
+                  </div>
+                </div>
+
                 {/* Fuel Level */}
                 <div style={{ 
                   padding: '1.25rem', 
@@ -662,7 +767,7 @@ const Driver: React.FC = () => {
                     <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>FUEL</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-                    <AnimatedCounter value={Math.round(fuelLevel)} suffix="" color={getFuelColor()} style={{ fontSize: '2rem', fontWeight: 700 }} />
+                    <MetricValue value={Math.round(fuelLevel)} suffix="" color={getFuelColor()} style={{ fontSize: '2rem', fontWeight: 700 }} />
                     <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>%</span>
                   </div>
                   <div className="text-xs" style={{ color: 'var(--text-muted)', marginTop: 4 }}>
@@ -671,7 +776,7 @@ const Driver: React.FC = () => {
                   {fuelLevel < 25 && (
                     <div style={{ marginTop: 8, padding: '4px 8px', background: 'var(--red-light)', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
                       <AlertTriangle size={12} color="var(--red)" />
-                      <span className="text-xs" style={{ color: 'var(--red)' }}>Refuel soon</span>
+                      <span className="text-xs" style={{ color: 'var(--red-dark)' }}>Refuel soon</span>
                     </div>
                   )}
                 </div>
@@ -688,7 +793,7 @@ const Driver: React.FC = () => {
                     <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>ENGINE</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-                    <AnimatedCounter value={Math.round(engineTemp)} suffix="" color={getTempColor()} style={{ fontSize: '2rem', fontWeight: 700 }} />
+                    <MetricValue value={Math.round(engineTemp)} suffix="" color={getTempColor()} style={{ fontSize: '2rem', fontWeight: 700 }} />
                     <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>°C</span>
                   </div>
                   <div className="text-xs" style={{ color: 'var(--text-muted)', marginTop: 4 }}>
@@ -697,29 +802,11 @@ const Driver: React.FC = () => {
                   {engineTemp >= 100 && (
                     <div style={{ marginTop: 8, padding: '4px 8px', background: 'var(--red-light)', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
                       <AlertTriangle size={12} color="var(--red)" />
-                      <span className="text-xs" style={{ color: 'var(--red)' }}>High temp</span>
+                      <span className="text-xs" style={{ color: 'var(--red-dark)' }}>High temp</span>
                     </div>
                   )}
                 </div>
 
-                {/* Verification Status */}
-                <div style={{ 
-                  padding: '1.25rem', 
-                  borderRadius: 12, 
-                  background: 'rgba(255,255,255,0.02)',
-                  border: `2px solid ${isVerified ? 'rgba(52,199,89,0.2)' : 'rgba(255,59,48,0.2)'}`
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                    {isVerified ? <CheckCircle2 size={18} color="var(--green)" /> : <XCircle size={18} color="var(--red)" />}
-                    <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>STATUS</span>
-                  </div>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 700, color: isVerified ? 'var(--green)' : 'var(--red)', marginBottom: 4 }}>
-                    {isVerified ? 'VERIFIED' : 'MANUAL'}
-                  </div>
-                  <div className="text-xs" style={{ color: 'var(--text-muted)', marginTop: 4 }}>
-                    {isVerified ? 'Sensors active' : 'Override mode'}
-                  </div>
-                </div>
               </div>
             </GlassCard>
 
@@ -746,7 +833,7 @@ const Driver: React.FC = () => {
               <div className="card-header">
                 <div className="card-title">
                   <div className="card-title-icon"><Video size={16} /></div>
-                  Dual Verification System
+                  Emergency Verification
                 </div>
                 <Tooltip label="Simulate a new camera detection reading">
                   <button onClick={toggleCameraDetect} disabled={!mySession || polling} className="btn btn-ghost btn-sm">
@@ -756,9 +843,14 @@ const Driver: React.FC = () => {
               </div>
 
               <div className="card-body">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: '0.72rem', fontWeight: 800, letterSpacing: '1px', color: !mySession ? 'var(--text-tertiary)' : isVerified ? 'var(--green-dark)' : 'var(--orange)' }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: !mySession ? '#c9c2b8' : isVerified ? 'var(--green)' : 'var(--orange)' }} />
+                  {!mySession ? 'STANDBY — AWAITING EMERGENCY ACTIVATION' : isVerified ? 'EMERGENCY VERIFIED' : 'VERIFYING…'}
+                </div>
 
               {/* Camera */}
               <div className="detection-row">
+                <div style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '1.5px', color: 'var(--text-tertiary)', marginBottom: 6 }}>CAMERA — YOLO OBJECT DETECTION</div>
                 <div className="detection-label">
                   <div className="flex items-center gap-2">
                     <Video size={14} color={mySession?.cameraDetected ? 'var(--c-green)' : 'var(--c-red)'} />
@@ -777,7 +869,7 @@ const Driver: React.FC = () => {
                   color={mySession?.cameraDetected ? 'var(--green)' : 'var(--red)'}
                 />
                 <div className="text-xs text-muted mt-1">
-                  Confidence: <AnimatedCounter value={mySession?.cameraConfidence ?? 0} suffix="%" color="var(--text-primary)" /> · Threshold: ≥75%
+                  Confidence: <MetricValue value={mySession?.cameraConfidence ?? 0} suffix="%" color="var(--text-primary)" /> · Threshold: ≥75%
                 </div>
 
                 {/* Real YOLO26 model inference - upload/capture an actual frame
@@ -823,6 +915,7 @@ const Driver: React.FC = () => {
 
               {/* Siren */}
               <div className="detection-row" style={{ marginTop: 12 }}>
+                <div style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '1.5px', color: 'var(--text-tertiary)', marginBottom: 6 }}>SIREN — AUDIO FFT</div>
                 <div className="detection-label">
                   <div className="flex items-center gap-2">
                     <Mic2 size={14} color={mySession?.sirenDetected ? 'var(--c-green)' : 'var(--c-red)'} />
@@ -842,7 +935,7 @@ const Driver: React.FC = () => {
                 </div>
                 <SirenWaveform active={mySession?.sirenDetected ?? false} frequency={mySession?.sirenFrequency ?? 0} />
                 <div className="text-xs text-muted mt-1">
-                  Frequency: <AnimatedCounter value={mySession?.sirenFrequency ?? 0} suffix=" Hz" color="var(--text-primary)" /> · Threshold: ≥700 Hz
+                  Frequency: <MetricValue value={mySession?.sirenFrequency ?? 0} suffix=" Hz" color="var(--text-primary)" /> · Threshold: ≥700 Hz
                 </div>
 
                 {/* Real FFT-based audio analysis - upload an actual WAV clip
@@ -868,7 +961,8 @@ const Driver: React.FC = () => {
                 </div>
               </div>
 
-              {/* Fail-safe status */}
+              {/* Overall verification */}
+              <div style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '1.5px', color: 'var(--text-tertiary)', marginTop: 12, marginBottom: 6 }}>OVERALL VERIFICATION</div>
               <div className={`mt-3 p-3 rounded flex items-center gap-3`} style={{
                 background: isVerified ? 'var(--green-light)' : 'var(--red-light)',
                 border: `1px solid ${isVerified ? 'rgba(52,199,89,0.25)' : 'rgba(255,59,48,0.2)'}`,
@@ -881,26 +975,6 @@ const Driver: React.FC = () => {
             </div>
             </div>
 
-            {/* Session Logs */}
-            <div className="card" style={{ maxHeight: 280 }}>
-              <div className="card-header">
-                <div className="card-title">
-                  <div className="card-title-icon" style={{ background: 'var(--purple-light)', color: 'var(--purple)' }}><Terminal size={16} /></div>
-                  Session Event Log
-                </div>
-              </div>
-              <div className="card-body" style={{ overflowY: 'auto', gap: 0 }}>
-                {myLogs.map(log => (
-                  <div key={log.id} className="log-entry">
-                    <div className="log-time">{new Date(log.timestamp).toLocaleTimeString('en-IN', { hour12: false })}</div>
-                    <div className="log-msg" style={{ color: log.type === 'error' ? 'var(--red)' : log.type === 'success' ? 'var(--green)' : log.type === 'warning' ? 'var(--orange)' : 'var(--text-secondary)' }}>
-                      {log.message}
-                    </div>
-                  </div>
-                ))}
-                {myLogs.length === 0 && <div className="text-xs text-quiet text-center mt-4">No events yet</div>}
-              </div>
-            </div>
           </div>
 
           {/* ── Right: Signals + Route ── */}
@@ -915,20 +989,35 @@ const Driver: React.FC = () => {
                 </div>
               </div>
               <div className="card-body">
-                <p className="text-xs text-muted mb-3">Signals flip GREEN as ambulance advances. Commands sent to the signal control engine via HTTP.</p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.8px', color: isEmergency ? 'var(--green-dark)' : 'var(--text-tertiary)' }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: isEmergency ? (greenCount > 0 ? 'var(--green)' : 'var(--orange)') : '#c9c2b8' }} />
+                  {isEmergency ? `GREEN CORRIDOR ACTIVE · ${greenCount}/${signalTotal} SIGNALS GREEN` : 'STANDBY — CORRIDOR ARMS ON ACTIVATION'}
+                </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(95px, 1fr))', gap: 10 }}>
-                {state?.signals.map(sig => (
-                  <div key={sig.id} className="card-stat" style={{ padding: '1rem', gap: '0.5rem' }}>
+                {state?.signals.map(sig => {
+                  const onRoute = !!mySession?.route.includes(sig.junction);
+                  const emphasized = isEmergency && onRoute;
+                  return (
+                  <div key={sig.id} className="card-stat" style={{
+                    padding: '1rem', gap: '0.5rem',
+                    border: emphasized && sig.color === 'GREEN' ? '2px solid rgba(52,199,89,0.5)' : undefined,
+                    boxShadow: emphasized && sig.color === 'GREEN' ? '0 0 16px rgba(52,199,89,0.25)' : undefined,
+                    opacity: isEmergency && !onRoute ? 0.55 : 1,
+                  }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                       <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{sig.name}</span>
                       {sig.manualOverride && (
                         <span style={{ fontSize: '0.65rem', padding: '2px 6px', background: 'var(--orange-light)', color: 'var(--orange)', borderRadius: 6, fontWeight: 600 }}>MANUAL</span>
                       )}
+                      {sig.contested ? (
+                        <span style={{ fontSize: '0.65rem', padding: '2px 6px', background: 'var(--orange-light)', color: 'var(--orange)', borderRadius: 6, fontWeight: 800 }} title="Multiple ambulances near this signal — higher severity wins">⚠ CONTESTED</span>
+                      ) : null}
                     </div>
                     <TrafficLight color={sig.color} name="" size="sm" />
                     <div className="text-xs mono" style={{ color: 'var(--text-secondary)', textAlign: 'center', marginTop: '0.25rem' }}>{sig.timer}s</div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
             </div>
@@ -947,28 +1036,69 @@ const Driver: React.FC = () => {
                 const isCurrent   = isEmergency && i === mySession!.currentNodeIndex;
                 const isPassed    = isEmergency && i < mySession!.currentNodeIndex;
                 const isDestination = i === route.length - 1;
+                const hasSignal   = (state?.signals ?? []).some(s => s.junction === node);
+                const subLabel    = isDestination ? 'Destination' : i === 0 ? 'Dispatch point' : hasSignal ? 'Signal corridor' : 'Waypoint';
                 return (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: i < route.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
-                    <div style={{
-                      width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 700,
-                      background: isCurrent ? 'var(--c-green-dim)' : isPassed ? 'rgba(93,125,166,0.1)' : 'rgba(255,255,255,0.04)',
-                      border: `1.5px solid ${isCurrent ? 'var(--c-green)' : isPassed ? '#5D7DA6' : '#2a3958'}`,
-                      color:  isCurrent ? 'var(--c-green)' : isPassed ? '#5D7DA6' : '#4a5878',
-                      boxShadow: isCurrent ? '0 0 12px rgba(134,171,151,0.3)' : 'none',
-                    }}>
-                      {isDestination ? '🏥' : isPassed && isEmergency ? '✓' : i + 1}
+                  <div key={i} style={{ display: 'flex', gap: 12, padding: '4px 0' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+                      <div style={{
+                        width: 28, height: 28, borderRadius: '50%',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 700,
+                        background: isCurrent ? 'var(--c-green-dim)' : isPassed ? 'rgba(93,125,166,0.1)' : 'rgba(255,255,255,0.04)',
+                        border: `1.5px solid ${isCurrent ? 'var(--c-green)' : isPassed ? '#5D7DA6' : '#2a3958'}`,
+                        color:  isCurrent ? 'var(--c-green)' : isPassed ? '#5D7DA6' : '#4a5878',
+                        boxShadow: isCurrent ? '0 0 12px rgba(134,171,151,0.3)' : 'none',
+                        zIndex: 1,
+                      }}>
+                        {isDestination ? '🏥' : isPassed && isEmergency ? '✓' : `0${i + 1}`.slice(-2)}
+                      </div>
+                      {i < route.length - 1 && (
+                        <div style={{ width: 2, flex: 1, minHeight: 14, background: isPassed ? '#5D7DA6' : 'rgba(0,0,0,0.08)', borderRadius: 1, opacity: isPassed ? 0.7 : 1 }} />
+                      )}
                     </div>
-                    <span className="text-sm flex-1" style={{ color: isCurrent ? 'var(--c-green)' : isPassed && isEmergency ? 'var(--text-tertiary)' : 'var(--text-primary)', fontWeight: isCurrent ? 600 : 400 }}>
-                      {node}
-                    </span>
-                    {isCurrent   && <span className="status-badge badge-green" style={{ fontSize: '0.65rem' }}>HERE</span>}
-                    {isPassed && isEmergency && <span className="text-xs text-quiet">✓ passed</span>}
+                    <div style={{ flex: 1, paddingBottom: 10 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span className="text-sm flex-1" style={{ color: isCurrent ? 'var(--c-green)' : isPassed && isEmergency ? 'var(--text-tertiary)' : 'var(--text-primary)', fontWeight: isCurrent ? 600 : 400 }}>
+                          {node}
+                        </span>
+                        {isCurrent   && <span className="status-badge badge-green" style={{ fontSize: '0.65rem' }}>HERE</span>}
+                        {isPassed && isEmergency && <span className="text-xs text-quiet">✓ passed</span>}
+                      </div>
+                      <div className="text-xs text-quiet" style={{ marginTop: 2 }}>{subLabel}</div>
+                    </div>
                   </div>
                 );
               })}
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* ── Session Event Timeline (full width) ── */}
+        <div className="card mt-4" style={{ maxHeight: 300 }}>
+          <div className="card-header">
+            <div className="card-title">
+              <div className="card-title-icon" style={{ background: 'var(--purple-light)', color: 'var(--purple)' }}><Terminal size={16} /></div>
+              Session Event Timeline
+            </div>
+            <span className="text-xs text-quiet">{myLogs.length} events</span>
+          </div>
+          <div className="card-body" style={{ overflowY: 'auto', gap: 0 }}>
+            {myLogs.map(log => (
+              <div key={log.id} className="log-entry" style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                <span style={{
+                  width: 8, height: 8, borderRadius: '50%', flexShrink: 0, marginTop: 4,
+                  background: log.type === 'error' ? 'var(--red)' : log.type === 'success' ? 'var(--green)' : log.type === 'warning' ? 'var(--orange)' : log.type === 'system' ? 'var(--blue)' : '#c9c2b8',
+                }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="log-time">{new Date(log.timestamp).toLocaleTimeString('en-IN', { hour12: false })}</div>
+                  <div className="log-msg" style={{ color: log.type === 'error' ? 'var(--red)' : log.type === 'success' ? 'var(--green)' : log.type === 'warning' ? 'var(--orange)' : 'var(--text-secondary)' }}>
+                    {log.message}
+                  </div>
+                </div>
+              </div>
+            ))}
+            {myLogs.length === 0 && <div className="text-xs text-quiet text-center mt-4">No events yet</div>}
           </div>
         </div>
       </div>

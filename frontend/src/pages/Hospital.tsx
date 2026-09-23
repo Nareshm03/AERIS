@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, Clock, BedDouble, CheckCheck, Siren, PhoneCall, MapPin, Plus, Minus } from 'lucide-react';
+import { Activity, BedDouble, CheckCheck, Siren, PhoneCall, MapPin, Plus, Minus } from 'lucide-react';
 import { useSSE } from '../hooks/usePoll';
 import Nav from '../components/Nav';
 import InteractiveMap from '../components/InteractiveMap';
@@ -131,8 +131,13 @@ const Hospital: React.FC = () => {
 
         <div className="page-header">
           <div>
-            <h1 className="page-title">Emergency Reception</h1>
-            <p className="page-subtitle">{session ? `${session.hospital.name} · Emergency Gateway` : 'Emergency Gateway'} · ICU Interface</p>
+            <div style={{ fontSize: '0.68rem', fontWeight: 800, letterSpacing: '2px', color: activeSessions.length > 0 ? 'var(--c-red-bright)' : 'var(--green-dark)', marginBottom: 4 }}>
+              {activeSessions.length > 0
+                ? `● INBOUND EMERGENCY · ${activeSessions.length} AMBULANCE${activeSessions.length > 1 ? 'S' : ''}`
+                : '● NO ACTIVE INBOUND'}
+            </div>
+            <h1 className="page-title">Hospital Emergency Center</h1>
+            <p className="page-subtitle">Inbound ambulance monitoring · Patient intake · Resource preparation</p>
           </div>
           <span className={`status-badge ${activeSessions.length > 0 ? 'badge-red' : 'badge-green'}`} style={{ fontSize: '0.85rem', padding: '8px 16px' }}>
             {activeSessions.length > 0
@@ -141,52 +146,14 @@ const Hospital: React.FC = () => {
           </span>
         </div>
 
-        {/* Bed capacity - real-time, editable. Closes a gap that was in
-            the original spec's DB schema (emergencyCapacity: totalBeds,
-            availableBeds) but never implemented until now. */}
-        <div className="card mb-4 animate-fade-up">
-          <div className="section-title mb-3"><BedDouble size={14} /> Bed Capacity (all network hospitals)</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
-            {hospitals.map(h => {
-              const pct = h.totalBeds > 0 ? (h.availableBeds / h.totalBeds) * 100 : 0;
-              const color = h.availableBeds === 0 ? 'var(--red-bright)' : pct <= 15 ? 'var(--orange)' : 'var(--green)';
-              return (
-                <div key={h.id} style={{ padding: '12px 14px', borderRadius: 12, background: 'rgba(0,0,0,0.02)', border: '1px solid rgba(0,0,0,0.05)' }}>
-                  <div className="text-sm font-semibold mb-1">{h.name}</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <Tooltip label="Decrease available beds">
-                      <button onClick={() => handleBedUpdate(h.id, -1)} disabled={savingBeds === h.id || h.availableBeds <= 0} className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }}>
-                        <Minus size={12} />
-                      </button>
-                    </Tooltip>
-                    <div style={{ flex: 1, textAlign: 'center' }}>
-                      <span style={{ fontWeight: 800, fontSize: '1.1rem', color }}>{h.availableBeds}</span>
-                      <span className="text-xs text-quiet"> / {h.totalBeds} beds</span>
-                    </div>
-                    <Tooltip label="Increase available beds">
-                      <button onClick={() => handleBedUpdate(h.id, 1)} disabled={savingBeds === h.id || h.availableBeds >= h.totalBeds} className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }}>
-                        <Plus size={12} />
-                      </button>
-                    </Tooltip>
-                  </div>
-                  <div style={{ height: 5, borderRadius: 3, background: 'rgba(0,0,0,0.06)', marginTop: 8, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${pct}%`, background: color, transition: 'width 0.3s ease' }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
         {activeSessions.length === 0 ? (
-          <div className="card text-center animate-fade-in" style={{ padding: '5rem 2rem', borderStyle: 'dashed' }}>
-            <Activity size={48} color="var(--text-tertiary)" style={{ margin: '0 auto 16px' }} />
-            <h3 className="font-semibold text-lg mb-2">No Active Emergency</h3>
-            <p className="text-muted text-sm mb-6">AERIS is monitoring. All bays are clear.</p>
+          <div className="card mb-4 animate-fade-in" style={{ padding: '2.5rem 2rem', textAlign: 'center' }}>
+            <Activity size={40} color="var(--green)" style={{ margin: '0 auto 12px' }} />
+            <h3 className="font-semibold text-lg mb-1">Hospital Ready</h3>
+            <p className="text-muted text-sm mb-4">No active inbound ambulance.<br />The hospital is monitoring the emergency network.</p>
             <div className="flex justify-center gap-3" style={{ flexWrap: 'wrap' }}>
-              {['Bay 01 — Open', 'Bay 02 — Open', 'Trauma — Standby', 'ICU — 2 Free'].map(b => (
-                <span key={b} className="status-badge badge-green">{b}</span>
-              ))}
+              <span className="status-badge badge-green">● OPERATIONAL — Inbound monitoring</span>
+              <span className={`status-badge ${connected ? 'badge-blue' : 'badge-yellow'}`}>SSE {connected ? '● CONNECTED' : '○ RECONNECTING'}</span>
             </div>
           </div>
         ) : (
@@ -195,7 +162,7 @@ const Hospital: React.FC = () => {
             {activeSessions.length > 1 && (
               <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
                 {activeSessions.map(s => (
-                  <button key={s.rid} onClick={() => setSelectedRID(s.rid)} style={{
+                  <button key={s.id} onClick={() => setSelectedRID(s.rid)} style={{
                     padding: '6px 16px', borderRadius: 16, cursor: 'pointer',
                     background: session?.rid === s.rid ? 'rgba(239,68,68,0.12)' : 'rgba(0,0,0,0.04)',
                     border: `1px solid ${session?.rid === s.rid ? 'rgba(239,68,68,0.3)' : 'rgba(0,0,0,0.08)'}`,
@@ -209,56 +176,44 @@ const Hospital: React.FC = () => {
 
             {session && (
               <>
-                {/* Inbound Banner */}
+                {/* Inbound hero: ambulance, route position, ETA, status */}
                 <div className="card card-emergency mb-4 animate-fade-in" style={{ borderColor: 'rgba(239,68,68,0.45)', padding: '1.5rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 20, alignItems: 'center' }}>
+                  <div className="section-title mb-3"><Siren size={15} color="var(--c-red)" /> Inbound Ambulance</div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+                    <CopyableText value={session.rid} className="mono font-extrabold" style={{ fontSize: '2rem', color: 'var(--c-red-bright)', letterSpacing: 2 }} />
+                    <span className={`status-badge ${etaMins > 0 ? 'badge-red' : 'badge-green'}`}>{etaMins > 0 ? 'INBOUND' : 'ARRIVING'}</span>
+                    <LiveBadge variant="red" />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 16 }}>
                     <div>
-                      <div className="section-title mb-2"><Siren size={15} color="var(--c-red)" /> Inbound Emergency Unit</div>
-                      <CopyableText value={session.rid} className="mono font-extrabold" style={{ fontSize: '2rem', color: 'var(--c-red-bright)', letterSpacing: 2 }} />
-                      <div className="flex gap-2 mt-3" style={{ flexWrap: 'wrap' }}>
-                        <span className="status-badge badge-red">Priority 1</span>
-                        <span className="status-badge badge-yellow">Green Corridor</span>
-                        <span className="status-badge badge-blue">{session.routeName}</span>
-                        <LiveBadge variant="red" />
-                        {session.cameraDetected && <StatusPulse status="active" label="CAM" size="sm" />}
-                        {session.sirenDetected  && <StatusPulse status="active" label="SIREN" size="sm" />}
+                      <div className="text-xs text-quiet mb-1">FROM — CURRENT POSITION</div>
+                      <div className="text-sm font-semibold">{session.route[session.currentNodeIndex]}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-quiet mb-1">DESTINATION</div>
+                      <div className="text-sm font-semibold">{session.hospital.name}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-quiet mb-1">ETA</div>
+                      <div className="mono font-extrabold" style={{ fontSize: '1.6rem', color: 'var(--c-yellow)', lineHeight: 1.1 }}>{etaDisplay}</div>
+                      <div style={{ marginTop: 8 }}>
+                        <AnimatedProgress value={etaProgress} height={6} color="var(--orange)" />
                       </div>
                     </div>
-
-                    {/* ETA Clock */}
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', background: 'rgba(0,0,0,0.04)', borderRadius: 16, padding: '1.25rem 2rem', border: '1px solid rgba(200,155,92,0.3)', minWidth: 180, position: 'relative', overflow: 'hidden' }}>
-                      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, transparent, rgba(200,155,92,0.05), transparent)', animation: 'shimmer 3s infinite' }} />
-                      <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
-                        <Clock size={28} color="var(--c-yellow)" style={{ marginBottom: 8, animation: 'pulse 2s ease-in-out infinite' }} />
-                        <div className="mono font-extrabold" style={{ fontSize: '2.8rem', color: 'var(--c-yellow)', lineHeight: 1, textShadow: '0 2px 8px rgba(200,155,92,0.3)' }}>{etaDisplay}</div>
-                        <div className="text-xs text-muted mt-2" style={{ letterSpacing: 1 }}>ARRIVAL</div>
-                        <div style={{ width: '100%', marginTop: 12 }}>
-                          <AnimatedProgress value={etaProgress} height={6} color="var(--orange)" />
-                        </div>
-                        <LiveBadge variant="red" />
-                      </div>
+                    <div>
+                      <div className="text-xs text-quiet mb-1">ROUTE</div>
+                      <div className="text-sm font-semibold">{session.routeName.split(' (')[0]}</div>
+                      <div className="text-xs text-muted mt-1">Node {session.currentNodeIndex + 1} of {session.route.length}</div>
                     </div>
-
-                    {/* Severity - set by the driver at patient intake, not editable here */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <div className="text-xs text-muted font-semibold" style={{ letterSpacing: 1, textTransform: 'uppercase' }}>Severity (from intake)</div>
-                      <div style={{
-                        padding: '6px 16px', borderRadius: 8, fontSize: '0.78rem', fontWeight: 700,
-                        border: `1px solid ${SEV_COLORS[sev]}80`,
-                        background: SEV_COLORS[sev] + '18',
-                        color: SEV_COLORS[sev],
-                      }}>{sev.toUpperCase()}</div>
-                    </div>
+                  </div>
+                  <div className="flex gap-2" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
+                    <span className="status-badge badge-red">Priority 1</span>
+                    <span className="status-badge badge-yellow">Green Corridor</span>
+                    {session.cameraDetected && <StatusPulse status="active" label="CAM" size="sm" />}
+                    {session.sirenDetected  && <StatusPulse status="active" label="SIREN" size="sm" />}
+                    <span className="text-xs text-muted" style={{ marginLeft: 'auto' }}>Severity (from intake): <strong style={{ color: SEV_COLORS[sev] }}>{sev.toUpperCase()}</strong></span>
                   </div>
                 </div>
-
-                {session.patient?.condition && (
-                  <div className="card mb-4 animate-fade-in" style={{ padding: '1rem 1.5rem' }}>
-                    <div className="text-xs text-quiet mb-1">Patient Condition (from driver intake)</div>
-                    <div className="text-sm font-semibold">{session.patient.condition}</div>
-                    {session.patient.notes && <div className="text-xs text-muted mt-1">{session.patient.notes}</div>}
-                  </div>
-                )}
 
                 {/* Map + Checklist */}
                 <div className="grid-2 stagger">
@@ -298,20 +253,30 @@ const Hospital: React.FC = () => {
                     {/* Bay Prep */}
                     <div className="card animate-fade-up">
                       <div className="section-title flex justify-between" style={{ marginBottom: 12 }}>
-                        <span className="flex items-center gap-2"><BedDouble size={14} /> Bay Preparation</span>
+                        <span className="flex items-center gap-2"><BedDouble size={14} /> Emergency Preparation</span>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                          <CircularProgress 
-                            value={checklist.filter(c => c.done).length} 
-                            max={Math.max(checklist.length, 1)} 
-                            size={50} 
+                          <span className="text-xs text-quiet">{checklist.filter(c => c.done).length}/{checklist.length} ready</span>
+                          <CircularProgress
+                            value={checklist.filter(c => c.done).length}
+                            max={Math.max(checklist.length, 1)}
+                            size={50}
                             color="var(--green)"
                           />
                           {!session.hospitalAcknowledged
-                            ? <Tooltip label="Confirm your hospital has seen this incoming emergency"><button onClick={() => handleAcknowledge(session.rid)} className="btn btn-success btn-sm">Acknowledge</button></Tooltip>
+                            ? <Tooltip label="Confirm your hospital has seen this incoming emergency"><button onClick={() => handleAcknowledge(session.rid)} className="btn btn-success btn-sm">Acknowledge Inbound</button></Tooltip>
                             : <StatusPulse status="active" label="ACK'D" size="md" />
                           }
                         </div>
                       </div>
+                      {!session.hospitalAcknowledged ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', marginBottom: 8, background: 'rgba(255,149,0,0.08)', border: '1px solid rgba(255,149,0,0.25)', borderRadius: 12, fontSize: '0.78rem', fontWeight: 700, color: 'var(--orange-dark)' }}>
+                          ⚠ ACTION REQUIRED — Incoming emergency requires acknowledgement.
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', marginBottom: 8, background: 'rgba(52,199,89,0.07)', border: '1px solid rgba(52,199,89,0.2)', borderRadius: 12, fontSize: '0.78rem', fontWeight: 700, color: 'var(--green-dark)' }}>
+                          ✓ INBOUND ACKNOWLEDGED — Hospital has acknowledged the incoming ambulance.
+                        </div>
+                      )}
                       {checklist.map((item) => (
                         <div key={item.id} onClick={() => handleTogglePrep(session.rid, item.id, item.done)}
                           className="flex items-center gap-3 p-2" style={{ borderBottom: '1px solid rgba(0,0,0,0.06)', cursor: 'pointer' }}>
@@ -330,17 +295,19 @@ const Hospital: React.FC = () => {
                       <VitalsMonitor vitals={session.vitals} severity={sev} />
                     </div>
 
-                    {/* Patient Profile */}
+                    {/* Patient Information (driver intake — read-only here) */}
                     <div className="card animate-fade-up">
-                      <div className="section-title"><PhoneCall size={14} /> Patient Profile</div>
+                      <div className="section-title"><PhoneCall size={14} /> Patient Information</div>
+                      <div style={{ marginBottom: 12 }}>
+                        <div className="text-xs text-quiet mb-1">PATIENT CONDITION</div>
+                        <div className="text-sm font-semibold" style={{ fontSize: '1rem' }}>{session.patient?.condition || 'Not specified'}</div>
+                        {session.patient?.notes && <div className="text-xs text-muted mt-1">{session.patient.notes}</div>}
+                      </div>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px', fontSize: '0.8rem' }}>
                         {[
-                          ['Case RID',       session.rid],
-                          ['Hospital',       session.hospital?.name || '—'],
+                          ['Emergency',      session.patient?.requiredDepartment || 'General Emergency'],
                           ['Severity',       sev.toUpperCase()],
-                          ['Department',     session.patient?.requiredDepartment || 'General Emergency'],
-                          ['Route',          session.routeName],
-                          ['ETA',            etaMins > 0 ? `~${etaMins} min` : 'Arriving NOW'],
+                          ['Ambulance',      session.rid],
                           ['Verified',       session.isVerified ? 'Yes (Dual sensor)' : 'Fail-safe'],
                           ['Acknowledged',   session.hospitalAcknowledged ? 'Yes' : 'Pending'],
                           ['Prep Progress',  `${checklist.filter(c => c.done).length}/${checklist.length} tasks`],
@@ -358,6 +325,44 @@ const Hospital: React.FC = () => {
             )}
           </>
         )}
+
+        {/* Bed capacity - real-time, editable. AVAILABLE emphasized with
+            OCCUPIED/TOTAL context; restrained semantic color only. */}
+        <div className="card mt-4 animate-fade-up">
+          <div className="section-title mb-3"><BedDouble size={14} /> Bed Capacity</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+            {hospitals.map(h => {
+              const pct = h.totalBeds > 0 ? (h.availableBeds / h.totalBeds) * 100 : 0;
+              const occupied = h.totalBeds - h.availableBeds;
+              const color = h.availableBeds === 0 ? 'var(--red-bright)' : pct <= 15 ? 'var(--orange)' : 'var(--green)';
+              return (
+                <div key={h.id} style={{ padding: '12px 14px', borderRadius: 12, background: 'rgba(0,0,0,0.02)', border: '1px solid rgba(0,0,0,0.05)' }}>
+                  <div className="text-sm font-semibold mb-1">{h.name}</div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+                    <span style={{ fontWeight: 800, fontSize: '1.6rem', color }}>{h.availableBeds}</span>
+                    <span className="text-xs text-quiet">AVAILABLE</span>
+                    <span className="text-xs text-muted" style={{ marginLeft: 'auto' }}>{occupied} occupied · {h.totalBeds} total</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <Tooltip label="Decrease available beds">
+                      <button onClick={() => handleBedUpdate(h.id, -1)} disabled={savingBeds === h.id || h.availableBeds <= 0} className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }}>
+                        <Minus size={12} />
+                      </button>
+                    </Tooltip>
+                    <div style={{ flex: 1, height: 5, borderRadius: 3, background: 'rgba(0,0,0,0.06)', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${pct}%`, background: color, transition: 'width 0.3s ease' }} />
+                    </div>
+                    <Tooltip label="Increase available beds">
+                      <button onClick={() => handleBedUpdate(h.id, 1)} disabled={savingBeds === h.id || h.availableBeds >= h.totalBeds} className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }}>
+                        <Plus size={12} />
+                      </button>
+                    </Tooltip>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </>
   );

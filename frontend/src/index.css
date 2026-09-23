@@ -7,6 +7,13 @@
    CSS CUSTOM PROPERTIES
 ================================ */
 :root {
+  /* ── Motion tokens: operational UI only. Instant for toggles/dots,
+     fast for hovers/dropdowns/toasts, slow for state transitions.
+     Applied selectively where they fit - not mechanically everywhere. ── */
+  --motion-instant: 0.12s;
+  --motion-fast: 0.25s;
+  --motion-slow: 0.5s;
+
   /* ── Typography: elegant display serif + premium sans + clean body ── */
   --font-display: 'Fraunces', Georgia, serif;
   --font-sans: 'Manrope', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -34,9 +41,9 @@
   --glass-shadow-lg: 0 24px 64px rgba(90, 60, 40, 0.12), 0 8px 20px rgba(90, 60, 40, 0.08);
 
   /* Warm charcoal text (not cool slate) - still WCAG AA compliant */
-  --text-primary: #241F2B;      /* Contrast: 14.2:1 */
-  --text-secondary: #5C5568;    /* Contrast: 7.4:1 */
-  --text-tertiary: #837C8E;     /* Contrast: 4.7:1 */
+  --text-primary: #241F2B;      /* Contrast: 16.08:1 */
+  --text-secondary: #5C5568;    /* Contrast: 7.11:1 */
+  --text-tertiary: #6F6978;     /* Contrast: 5.29:1 - darkened from #837C8E which failed AA at 4.01:1 */
 
   /* ═══════════════════════════════════════════════════════════
      PREMIUM PASTEL PALETTE — one bold bright accent (crimson,
@@ -66,7 +73,7 @@
 
   /* Warm sand (was saturated orange/amber) */
   --orange: #C89B5C;
-  --orange-dark: #A67D42;
+  --orange-dark: #95703B;    /* Contrast: 4.51:1 - darkened from #A67D42 which failed AA at 3.73:1 */
   --orange-light: #F7EEDD;
   --orange-bright: #D6AD72;
 
@@ -160,7 +167,8 @@ body::after {
   background-size: 180px 180px;
 }
 
-/* Ambient glow orbs */
+/* Ambient glow orbs - static gradients (no drift animation): the identity
+   stays, the continuous compositing cost goes. */
 body::before {
   content: '';
   position: fixed;
@@ -172,7 +180,6 @@ body::before {
   border-radius: 50%;
   z-index: 0;
   pointer-events: none;
-  animation: float 20s ease-in-out infinite;
 }
 
 .container::before {
@@ -186,7 +193,6 @@ body::before {
   border-radius: 50%;
   z-index: 0;
   pointer-events: none;
-  animation: floatReverse 25s ease-in-out infinite;
 }
 
 /* Ensure all page content sits above the noise layer */
@@ -214,11 +220,6 @@ body::before {
   50% { opacity: 0.8; transform: scale(1.05); }
 }
 
-@keyframes glow {
-  0%, 100% { box-shadow: 0 0 5px currentColor; }
-  50% { box-shadow: 0 0 20px currentColor; }
-}
-
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(20px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -234,9 +235,33 @@ body::before {
   to   { opacity: 1; transform: translateX(0); }
 }
 
-@keyframes slideInLeft {
-  from { opacity: 0; transform: translateX(-30px); }
-  to   { opacity: 1; transform: translateX(0); }
+@keyframes toastOut {
+  to { opacity: 0; transform: translateX(30px); }
+}
+
+/* One-shot emergency-activation flash: a red ring that expands and fades
+   once over ~0.5s, then the banner simply remains in its ACTIVE state.
+   No bounce, no zoom, no loop. */
+@keyframes activateFlash {
+  0% { box-shadow: 0 0 0 0 rgba(255, 59, 92, 0.55); }
+  100% { box-shadow: 0 0 0 16px rgba(255, 59, 92, 0); }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   REDUCED MOTION: when the user requests it, every animation
+   resolves to its final state immediately. Information is never
+   animation-only in this app - ambulance/marker positions, signal
+   colors + text labels, Live/SSE dots, REC color, skeleton shapes,
+   contested badges and toast text all read statically. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @keyframes scaleIn {
@@ -277,77 +302,9 @@ body::before {
   to   { opacity: 1; transform: translateX(0); }
 }
 
-@keyframes progress-fill {
-  from { width: 0%; }
-  to   { width: var(--progress-target); }
-}
-
-@keyframes float {
-  0%, 100% { transform: translateY(0px) rotate(0deg); }
-  33% { transform: translateY(-20px) rotate(5deg); }
-  66% { transform: translateY(-10px) rotate(-5deg); }
-}
-
-@keyframes floatReverse {
-  0%, 100% { transform: translateY(0px) rotate(0deg); }
-  33% { transform: translateY(15px) rotate(-3deg); }
-  66% { transform: translateY(8px) rotate(3deg); }
-}
-
-@keyframes gradientShift {
-  0%, 100% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-}
-
-@keyframes slideUp {
-  from { opacity: 0; transform: translateY(40px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes bounceIn {
-  0% { opacity: 0; transform: scale(0.3); }
-  50% { opacity: 1; transform: scale(1.05); }
-  70% { transform: scale(0.9); }
-  100% { transform: scale(1); }
-}
-
-@keyframes ripple {
-  0% { box-shadow: 0 0 0 0 currentColor, 0 0 0 0 currentColor; }
-  100% { box-shadow: 0 0 0 10px transparent, 0 0 0 20px transparent; }
-}
-
-@keyframes glowPulse {
-  0%, 100% { filter: drop-shadow(0 0 8px currentColor) brightness(1); }
-  50% { filter: drop-shadow(0 0 20px currentColor) brightness(1.2); }
-}
-
-@keyframes morphBlob {
-  0%, 100% { border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%; }
-  50% { border-radius: 30% 60% 70% 40% / 50% 60% 30% 60%; }
-}
-
-@keyframes textShine {
-  0% { background-position: -500%; }
-  100% { background-position: 500%; }
-}
-
-@keyframes cardFloat {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-8px); }
-}
-
-@keyframes neon-flicker {
-  0%, 100% { text-shadow: 0 0 10px rgba(59,130,246,0.8), 0 0 30px rgba(59,130,246,0.5); }
-  50%      { text-shadow: 0 0 5px rgba(59,130,246,0.4), 0 0 15px rgba(59,130,246,0.3); }
-}
-
 .animate-fade-up   { animation: fadeInUp 0.5s ease both; }
 .animate-fade-in   { animation: fadeIn 0.4s ease both; }
 .animate-slide-in  { animation: slide-in 0.3s ease both; }
-.animate-slide-up  { animation: slideUp 0.6s cubic-bezier(0.4, 0, 0.2, 1) both; }
-.animate-bounce-in { animation: bounceIn 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55) both; }
-.animate-glow      { animation: glowPulse 2s ease-in-out infinite; }
-.animate-float     { animation: cardFloat 3s ease-in-out infinite; }
 
 /* Stagger children */
 .stagger > *:nth-child(1) { animation-delay: 0.05s; }
@@ -415,8 +372,6 @@ body::before {
   transition: background 0.35s cubic-bezier(0.4, 0, 0.2, 1),
               border-color 0.35s cubic-bezier(0.4, 0, 0.2, 1),
               box-shadow 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-  transform-style: preserve-3d;
-  will-change: transform;
   box-shadow:
     0 8px 32px rgba(90, 60, 40, 0.06),
     0 2px 8px rgba(90, 60, 40, 0.04),
@@ -427,48 +382,6 @@ body::before {
   flex-direction: column;
   position: relative;
   overflow: hidden;
-  --mx: 50%;
-  --my: 50%;
-}
-
-/* Corner accent notch - a folded-corner shape that tints in with the bold
-   accent color on hover. Quiet by default, distinctive when noticed. */
-.card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 0;
-  height: 0;
-  border-style: solid;
-  border-width: 0 34px 34px 0;
-  border-color: transparent var(--red-bright) transparent transparent;
-  opacity: 0;
-  transform: translate(6px, -6px);
-  transition: opacity 0.3s ease, transform 0.3s ease;
-  pointer-events: none;
-  z-index: 1;
-}
-.card:hover::before {
-  opacity: 0.16;
-  transform: translate(0, 0);
-}
-
-/* Liquid Glass cursor sheen - a soft specular highlight that tracks the
-   mouse position inside the card (via --mx/--my, set by a global mousemove
-   listener - see components/LiquidGlassTracker.tsx), like light catching
-   real glass. */
-.card::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(360px circle at var(--mx) var(--my), rgba(255,255,255,0.55), transparent 55%);
-  opacity: 0;
-  transition: opacity 0.4s ease;
-  pointer-events: none;
-}
-.card:hover::after {
-  opacity: 1;
 }
 
 .card:hover {
@@ -483,9 +396,6 @@ body::before {
     0 4px 16px rgba(90, 60, 40, 0.06),
     inset 0 2px 4px 0 rgba(255, 255, 255, 0.9),
     inset 0 -2px 2px 0 rgba(90, 60, 40, 0.03);
-  /* transform is owned entirely by the JS spring tilt (see
-     LiquidGlassTracker.tsx) - a CSS transition on transform here would
-     fight the per-frame requestAnimationFrame updates and cause stutter. */
 }
 
 .card-interactive {
@@ -1071,13 +981,7 @@ body::before {
     rgba(16,185,129,0.1) 270deg,
     transparent 360deg
   );
-  animation: rotate 8s linear infinite;
   pointer-events: none;
-}
-
-@keyframes rotate {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
 }
 
 .card-glow:hover {
@@ -1157,7 +1061,6 @@ body::before {
     rgba(59,130,246,0.3)
   );
   background-size: 200% 100%;
-  animation: borderFlow 3s linear infinite;
   z-index: -1;
   opacity: 0;
   transition: opacity 0.35s;
@@ -1165,11 +1068,6 @@ body::before {
 
 .status-card:hover::before {
   opacity: 1;
-}
-
-@keyframes borderFlow {
-  0% { background-position: 0% 0%; }
-  100% { background-position: 200% 0%; }
 }
 
 .status-card:hover {
@@ -1759,10 +1657,10 @@ body::before {
 .text-primary  { color: var(--text-primary); }
 .text-muted    { color: var(--text-secondary); }
 .text-quiet    { color: var(--text-tertiary); }
-.text-green    { color: var(--green); }
-.text-red      { color: var(--red); }
-.text-yellow   { color: var(--orange); }
-.text-blue     { color: var(--blue); }
+.text-green    { color: var(--green-dark); }
+.text-red      { color: var(--red-dark); }
+.text-yellow   { color: var(--orange-dark); }
+.text-blue     { color: var(--blue-dark); }
 
 /* Visual Hierarchy Utilities */
 .text-primary-bold { color: var(--text-primary); font-weight: 700; }

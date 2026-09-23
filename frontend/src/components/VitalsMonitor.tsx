@@ -27,9 +27,10 @@ function bpColor(sys: number) {
 
 const VitalsMonitor: React.FC<VitalsMonitorProps> = ({ vitals, compact = false }) => {
   const { heartRate, bpSystolic, bpDiastolic, spo2 } = vitals;
-  // Pulse animation speed reflects actual heart rate - faster HR, faster
-  // visual pulse, so the monitor "feels" alive rather than just showing text.
-  const pulseDuration = Math.max(0.35, 60 / Math.max(heartRate, 1));
+  // Pulse speed reflects actual heart rate, clamped to a calm 0.5–1.2s
+  // band so even a critical HR never becomes frantic. Opacity-only
+  // (blink-dot) rather than scale - emphasis without agitation.
+  const pulseDuration = Math.min(1.2, Math.max(0.5, 60 / Math.max(heartRate, 1)));
 
   return (
     <div style={{ display: 'flex', gap: compact ? 14 : 20, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -38,7 +39,7 @@ const VitalsMonitor: React.FC<VitalsMonitorProps> = ({ vitals, compact = false }
           size={compact ? 16 : 20}
           color={hrColor(heartRate)}
           fill={hrColor(heartRate)}
-          style={{ animation: `pulse ${pulseDuration}s ease-in-out infinite` }}
+          style={{ animation: `blink-dot ${pulseDuration}s ease-in-out infinite` }}
         />
         <div>
           <div style={{ fontWeight: 800, fontSize: compact ? '0.95rem' : '1.15rem', color: hrColor(heartRate), lineHeight: 1 }}>

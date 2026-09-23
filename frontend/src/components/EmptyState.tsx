@@ -22,7 +22,7 @@ const EmptyState: React.FC<EmptyStateProps> = ({ icon: Icon, title, subtitle, ac
         width: 64, height: 64, borderRadius: '50%',
         background: 'rgba(255,255,255,0.04)', border: '1px dashed rgba(255,255,255,0.12)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        marginBottom: 8, animation: 'float 4s ease-in-out infinite',
+        marginBottom: 8,
       }}>
         <Icon size={26} color="var(--text-tertiary, #4a5878)" strokeWidth={1.5} />
       </div>
