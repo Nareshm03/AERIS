@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Server, Terminal, RefreshCw, Activity, Cpu, Database, Wifi, Zap, HardDrive, Trash2, Clock, Download } from 'lucide-react';
 import { useSSE } from '../hooks/usePoll';
+import { useGraph } from '../hooks/useGraph';
 import { resetSystem, deleteSession, fetchSignalEngine, fetchIncidentHistory } from '../api';
 import type { SignalEngineStatus, IncidentHistoryEntry } from '../api';
 import Nav from '../components/Nav';
@@ -54,6 +55,7 @@ const LOG_ICONS: Record<string, string> = {
 
 const Admin: React.FC = () => {
   const { state, logs, connected, error: sseError, reconnect } = useSSE();
+  const { coords: nodeCoords } = useGraph();
   const { toast }  = useToast();
   const [signalEngine, setSignalEngine]  = useState<SignalEngineStatus | null>(null);
   const [signalEngineLoading, setSignalEngineLoading] = useState(true);
@@ -160,11 +162,11 @@ const Admin: React.FC = () => {
   };
 
   const handleExportHistory = () => {
-    const headers = ['RID', 'Hospital', 'Condition', 'Severity', 'Department', 'Status', 'Route', 'Started', 'Ended', 'Duration (s)', 'Verified'];
+    const headers = ['RID', 'Hospital', 'Condition', 'Severity', 'Department', 'Status', 'Route', 'Started', 'Ended', 'Duration (s)', 'Hospital Ack'];
     const escapeCsv = (val: string) => `"${String(val).replace(/"/g, '""')}"`;
     const rows = history.map(h => [
       h.rid, h.hospital.name, h.patient.condition, h.patient.severity, h.patient.requiredDepartment,
-      h.status, h.routeName, h.startedAt, h.endedAt || '', h.durationSeconds ?? '', h.wasVerified ? 'Yes' : 'No',
+      h.status, h.routeName, h.startedAt, h.endedAt || '', h.durationSeconds ?? '', h.hospitalAcknowledged ? 'Yes' : 'No',
     ].map(v => escapeCsv(String(v))).join(','));
 
     const csv = [headers.join(','), ...rows].join('\n');
@@ -256,21 +258,11 @@ const Admin: React.FC = () => {
         {active.length > 0 && (
           <div className="card mb-4 animate-fade-up">
             <div className="section-title"><Activity size={14} /> Live Network Map — {active.length} Active Session(s)</div>
-            <InteractiveMap 
-              sessions={state.sessions} 
-              signals={state.signals.map(s => {
-                const junctionCoords: Record<string, [number, number]> = {
-                  '100 Feet Road Junction': [12.9719, 77.6412],
-                  'Domlur Flyover': [12.9604, 77.6417],
-                  'Kodihalli Junction': [12.9601, 77.6472],
-                  'Marathahalli (ORR)': [12.9562, 77.7019],
-                  'Halasuru (Ulsoor)': [12.9757, 77.6263],
-                  'Trinity Circle': [12.9730, 77.6170],
-                  'Adugodi': [12.9435, 77.6091],
-                };
-                const [lat, lng] = junctionCoords[s.junction] || [12.9786, 77.6388];
-                return { id: s.id, name: s.name, color: s.color, lat, lng };
-              })} 
+            <InteractiveMap
+              sessions={state.sessions}
+              signals={state.signals}
+              hospitals={state.hospitals}
+              nodeCoords={nodeCoords}
               centerOnAmbulance={false}
               showTraffic={true}
               showLegend={true}
@@ -292,7 +284,7 @@ const Admin: React.FC = () => {
               ) : (
                 <table className="data-table">
                   <thead>
-                    <tr><th>RID</th><th>Route</th><th>Status</th><th>Verified</th><th>Action</th></tr>
+                    <tr><th>RID</th><th>Route</th><th>Status</th><th>Hospital</th><th>Action</th></tr>
                   </thead>
                   <tbody>
                     {all.map(s => (
@@ -305,8 +297,8 @@ const Admin: React.FC = () => {
                           </span>
                         </td>
                         <td>
-                          <span className={`status-badge text-xs ${s.isVerified ? 'badge-green' : 'badge-yellow'}`}>
-                            {s.isVerified ? 'DUAL ✓' : 'MANUAL'}
+                          <span className={`status-badge text-xs ${s.hospitalAcknowledged ? 'badge-green' : 'badge-yellow'}`}>
+                            {s.hospitalAcknowledged ? "ACK'D" : 'PENDING'}
                           </span>
                         </td>
                         <td>
@@ -356,7 +348,7 @@ const Admin: React.FC = () => {
                     ['Auth', 'JWT (bcrypt, 8hr)', 'green'],
                     ['Routing', 'Dijkstra Algorithm', 'blue'],
                     ['Real-time', 'Server-Sent Events', 'blue'],
-                    ['Detection', 'Camera + Siren APIs', active.length > 0 ? 'green' : 'blue'],
+                    ['Authorization', 'JWT + RBAC (operator)', active.length > 0 ? 'green' : 'blue'],
                     ['Signal Engine Link', `${SIGNAL_ENGINE_LABEL}`, signalEngine ? 'green' : 'yellow'],
                     ['SSE Clients', connected ? '1+ connected' : 'None', connected ? 'green' : 'red'],
                   ].map(([k, v, b]) => (
@@ -364,6 +356,27 @@ const Admin: React.FC = () => {
                   ))}
                 </tbody>
               </table>
+            </div>
+
+            {/* Hospital network - all valid destinations with live bed
+                state, straight from backend state (no invented telemetry) */}
+            <div className="card animate-fade-up">
+              <div className="section-title">🏥 Hospital Network <span className="text-xs text-quiet" style={{ marginLeft: 'auto' }}>{state.hospitals.length} destinations</span></div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {state.hospitals.map(h => {
+                  const inbound = active.filter(s => s.hospital.id === h.id).length;
+                  return (
+                    <div key={h.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, background: inbound > 0 ? 'rgba(255,59,92,0.06)' : 'rgba(0,0,0,0.02)', border: `1px solid ${inbound > 0 ? 'rgba(255,59,92,0.25)' : 'rgba(0,0,0,0.05)'}` }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="text-sm font-semibold">{h.shortName}</div>
+                        <div className="text-xs text-quiet">{h.area}</div>
+                      </div>
+                      {inbound > 0 && <span className="status-badge badge-red text-xs">INBOUND ×{inbound}</span>}
+                      <span className="text-xs mono" style={{ color: h.availableBeds === 0 ? 'var(--red-bright)' : 'var(--text-secondary)', whiteSpace: 'nowrap' }}>🛏 {h.availableBeds}/{h.totalBeds}</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
 

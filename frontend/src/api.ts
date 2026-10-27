@@ -5,17 +5,34 @@ import type { AxiosInstance, AxiosError } from 'axios';
 export interface Signal {
   id: string; name: string; junction: string;
   color: 'RED' | 'YELLOW' | 'GREEN'; timer: number; manualOverride: boolean;
+  lat: number; lng: number;
   contested?: boolean; contenderCount?: number;
 }
 
 export interface RouteOption {
   id: string; name: string; nodes: string[]; distance: string; estimatedTime: number;
+  // Corridor shape: how many software signals sit on this route's nodes.
+  signals: number;
 }
 
 export interface Hospital {
-  id: string; name: string; node: string; departments: string[]; address: string;
+  id: string; name: string; shortName: string; area: string; node: string;
+  lat: number; lng: number;
+  departments: string[]; address: string;
   distanceKm: number | null; estimatedMinutes: number | null; reachable: boolean;
   totalBeds: number; availableBeds: number;
+}
+
+export interface GraphNode {
+  id: string; name: string; lat: number; lng: number;
+}
+
+export interface GraphEdge {
+  from: string; to: string; distanceKm: number; travelTimeMin: number;
+}
+
+export interface GraphData {
+  nodes: GraphNode[]; edges: GraphEdge[];
 }
 
 export interface AmbulanceSession {
@@ -23,9 +40,9 @@ export interface AmbulanceSession {
   route: string[]; routeName: string;
   currentNodeIndex: number;
   currentGPS: [number, number];
-  cameraDetected: boolean; cameraConfidence: number;
-  sirenDetected: boolean; sirenFrequency: number;
-  isVerified: boolean; startedAt: string;
+  // Software-only emergency state: authorization comes from JWT/RBAC at
+  // activation time. An 'active' session IS an authorized emergency.
+  startedAt: string;
   ticksSinceAdvance: number;
   status: 'active' | 'arrived' | 'cancelled';
   patient: {
@@ -36,6 +53,9 @@ export interface AmbulanceSession {
   };
   hospital: { id: string; name: string; node: string };
   vitals: { heartRate: number; bpSystolic: number; bpDiastolic: number; spo2: number };
+  // Simulated vehicle telemetry, owned + ticked by the backend (SSE-synced).
+  fuelLevel: number;
+  engineTemp: number;
   hospitalAcknowledged: boolean;
   hospitalAcknowledgedAt: string | null;
   prepTasks: { id: string; label: string; done: boolean }[];
@@ -59,6 +79,10 @@ export interface LogEntry {
 
 export interface AuthUser {
   sub: string; name: string; role: string; username: string;
+  // Present for hospital-role logins: the ONE hospital this account belongs
+  // to. Used client-side only to scope actions to owned sessions - the
+  // backend enforces ownership independently via RBAC.
+  hospitalId?: string;
 }
 
 export interface SignalEngineStatus {
@@ -70,21 +94,6 @@ export interface SignalEngineStatus {
   totalCommands?: number;
   signals?: { name: string; state: string; lastUpdate?: string; commandsReceived?: number }[];
   commandLog?: { ts: string; signal: string; color: string }[];
-}
-
-export interface DetectionToggleResponse {
-  success: boolean;
-  cameraDetected?: boolean;
-  cameraConfidence?: number;
-  sirenDetected?: boolean;
-  sirenFrequency?: number;
-  isVerified: boolean;
-  verificationStatus: {
-    emergencyActive: boolean;
-    cameraDetected: boolean;
-    sirenDetected: boolean;
-    isVerified: boolean;
-  };
 }
 
 export interface ApiError {
@@ -179,6 +188,7 @@ export const loginUser = async (username: string, password: string): Promise<{ t
       name: user.name,
       role: user.role,
       username: user.username ?? username,
+      hospitalId: user.hospitalId,
     };
     return { token, user: normalized };
   } catch (error) {
@@ -252,7 +262,7 @@ export interface IncidentHistoryEntry {
   startedAt: string;
   endedAt: string | null;
   durationSeconds: number | null;
-  wasVerified: boolean;
+  hospitalAcknowledged: boolean;
 }
 
 export const fetchIncidentHistory = async (statusFilter?: 'arrived' | 'cancelled'): Promise<{
@@ -261,6 +271,17 @@ export const fetchIncidentHistory = async (statusFilter?: 'arrived' | 'cancelled
 }> => {
   try {
     const res = await http.get('/emergency/history', { params: statusFilter ? { status: statusFilter } : {} });
+    return res.data;
+  } catch (error) {
+    throw new Error(handleApiError(error));
+  }
+};
+
+// Road graph - the single source of truth for junctions, coordinates and
+// adjacency. The frontend must not hard-code mirrors of the backend graph.
+export const fetchGraph = async (): Promise<GraphData> => {
+  try {
+    const res = await http.get('/graph');
     return res.data;
   } catch (error) {
     throw new Error(handleApiError(error));
@@ -332,85 +353,7 @@ export const overrideSignal = async (signalId: string, color: string): Promise<{
   }
 };
 
-// Detection System
-export const toggleCameraDetection = async (rid: string): Promise<DetectionToggleResponse> => {
-  try {
-    const res = await http.post('/detect/camera/toggle', { rid });
-    return res.data;
-  } catch (error) {
-    throw new Error(handleApiError(error));
-  }
-};
-
-export const toggleSirenDetection = async (rid: string): Promise<DetectionToggleResponse> => {
-  try {
-    const res = await http.post('/detect/siren/toggle', { rid });
-    return res.data;
-  } catch (error) {
-    throw new Error(handleApiError(error));
-  }
-};
-
-export const detectCamera = async (rid: string): Promise<{ detected: boolean; confidence: number; class: string }> => {
-  try {
-    const res = await http.post('/detect/camera', { rid });
-    return res.data;
-  } catch (error) {
-    throw new Error(handleApiError(error));
-  }
-};
-
-// Real YOLO detection - sends an actual captured frame (e.g. from a file
-// input or a <canvas> snapshot) to be run through your trained best.onnx
-// model via the detection microservice. Falls back gracefully server-side
-// to the old simulated behavior if the detection service is unreachable.
-export interface RealDetectionResult {
-  detected: boolean;
-  confidence: number;
-  sirenDetected: boolean;
-  sirenConfidence: number;
-  combinedStatus: 'high_confidence' | 'partial' | 'unverified';
-  boundingBox: { x1: number; y1: number; x2: number; y2: number } | null;
-  allDetections: { class: string; classId: number; confidence: number; box: any }[];
-}
-
-export const detectCameraReal = async (rid: string, frameFile: File | Blob): Promise<RealDetectionResult> => {
-  const frameBase64 = await blobToBase64(frameFile);
-  try {
-    const res = await http.post('/detect/camera', { rid, frameBase64 });
-    return res.data;
-  } catch (error) {
-    throw new Error(handleApiError(error));
-  }
-};
-
-// Real FFT-based audio siren detection - sends an actual WAV clip to be
-// analyzed for the characteristic siren sweep pattern (see
-// detection-service/siren_detector.py). Falls back gracefully server-side
-// if the detection service is unreachable.
-export const detectSirenReal = async (rid: string, audioFile: File | Blob): Promise<{ sirenDetected: boolean; confidence: number; energyRatio?: number; periodicityScore?: number }> => {
-  const audioBase64 = await blobToBase64(audioFile);
-  try {
-    const res = await http.post('/detect/siren', { rid, audioBase64 });
-    return res.data;
-  } catch (error) {
-    throw new Error(handleApiError(error));
-  }
-};
-
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const result = reader.result as string;
-      resolve(result.split(',')[1]); // strip the data:image/...;base64, prefix
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
-
-// ── Roadblock reporting (Section 9 of the spec) ─────────────────────────
+// ── Roadblock reporting ───────────────────────────────────────────────
 export interface RoadblockList { blocked: [string, string][]; }
 
 export const listRoadblocks = async (): Promise<RoadblockList> => {
@@ -434,15 +377,6 @@ export const reportRoadblock = async (from: string, to: string): Promise<Roadblo
 export const clearRoadblock = async (from: string, to: string): Promise<RoadblockList & { success: boolean }> => {
   try {
     const res = await http.delete('/roadblock', { data: { from, to } });
-    return res.data;
-  } catch (error) {
-    throw new Error(handleApiError(error));
-  }
-};
-
-export const detectSiren = async (rid: string, frequency?: number): Promise<{ detected: boolean; frequency: number; threshold: number }> => {
-  try {
-    const res = await http.post('/detect/siren', { rid, frequency });
     return res.data;
   } catch (error) {
     throw new Error(handleApiError(error));

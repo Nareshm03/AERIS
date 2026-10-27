@@ -1,6 +1,6 @@
 # 🚑 AERIS - Ambulance Emergency Response Intelligent System
 
-**Full-Stack Real-Time Emergency Response System with Live GPS Tracking**
+**Software-Only Emergency Routing & Intelligent Traffic Coordination Platform**
 
 ![AERIS Banner](https://img.shields.io/badge/AERIS-v2.1-blue?style=for-the-badge)
 ![Status](https://img.shields.io/badge/Status-Production%20Ready-success?style=for-the-badge)
@@ -10,14 +10,14 @@
 
 ## 🌟 Overview
 
-AERIS is a cutting-edge **Ambulance Emergency Response Intelligent System** that provides real-time ambulance tracking, intelligent traffic signal control, and multi-role dashboards for emergency response coordination. **This is a complete, self-contained software system** — every component, including traffic signal control and detection, runs entirely in software. There is no physical hardware anywhere in this project.
+AERIS is a cutting-edge **Ambulance Emergency Response Intelligent System** that provides real-time software ambulance tracking, intelligent traffic signal coordination, and multi-role dashboards for emergency response coordination. **This is a complete, self-contained software-only system** — every component, including traffic signal state, ambulance movement, routing, and hospital/police coordination, runs entirely in software. There is no physical hardware, camera, microphone, sensor, or GPS device anywhere in this project.
 
 ### 🎯 Key Features
 
-- ✅ **Real-Time GPS Tracking** - Live ambulance movement on interactive OpenStreetMap
+- ✅ **Real-Time Ambulance Tracking** - Live software-simulated ambulance movement on interactive OpenStreetMap
 - ✅ **Intelligent Routing** - Dijkstra algorithm for optimal path calculation, with live rerouting around reported roadblocks
-- ✅ **Green Corridor System** - Automatic traffic signal control along ambulance route (software signal engine, see below)
-- ✅ **Dual Verification** - Real YOLO26 object detection + real FFT-based audio siren analysis, with a fail-safe simulated fallback
+- ✅ **Green Corridor System** - Automatic software traffic-signal state coordination along the ambulance route (virtual signals, see below)
+- ✅ **Operator-Authorized Emergencies** - Emergency sessions are created directly by the authenticated ambulance operator (JWT + RBAC), no hardware verification step
 - ✅ **Multi-Role Dashboards** - Driver, Police, Hospital, and Admin interfaces
 - ✅ **Real-Time Updates** - Server-Sent Events (SSE) push updates live to every connected dashboard
 - ✅ **Dark Theme UI** - Modern, professional interface with smooth animations
@@ -57,7 +57,6 @@ AERIS/
 ### Prerequisites
 
 - Node.js 18+ and npm
-- Python 3.10+ (for the detection microservice)
 - Modern browser (Chrome/Edge/Firefox)
 
 ### Installation
@@ -74,10 +73,6 @@ npm install
 # Install frontend dependencies
 cd ../frontend
 npm install
-
-# Install detection-service dependencies (YOLO + FFT audio analysis)
-cd ../backend
-python -m pip install -r requirements.txt
 ```
 
 ### Environment
@@ -91,38 +86,31 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 ### Running the Application
 
-On Windows, `start-aeris.bat` launches all four services (checks for
+On Windows, `start-aeris.bat` launches all three services (checks for
 `backend\.env` first). Manually, one terminal per service:
 
-**Terminal 1 - Detection service:**
-```bash
-cd backend
-python -m uvicorn app:app --host 0.0.0.0 --port 8001
-# Health: http://localhost:8001/health
-```
-
-**Terminal 2 - Signal engine:**
+**Terminal 1 - Signal engine:**
 ```bash
 cd backend
 npm run dev:signals
 # Health: http://localhost:4001/health
 ```
 
-**Terminal 3 - Backend:**
+**Terminal 2 - Backend:**
 ```bash
 cd backend
 npm run dev
 # Server runs on http://localhost:4000
 ```
 
-**Terminal 4 - Frontend:**
+**Terminal 3 - Frontend:**
 ```bash
 cd frontend
 npm run dev
 # App runs on http://localhost:5173
 ```
 
-Run `diagnose.bat` (Windows) or `diagnose.sh` to verify all four services.
+Run `diagnose.bat` (Windows) or `diagnose.sh` to verify all three services.
 
 ### Login Credentials
 
@@ -135,11 +123,15 @@ Run `diagnose.bat` (Windows) or `diagnose.sh` to verify all four services.
 | 🏥 Hospital | `hospital` | `hospital123` | Manipal Hospital staff |
 | 🏥 Hospital | `hospital2` | `hospital123` | St. John's Medical College staff |
 | 🏥 Hospital | `hospital3` | `hospital123` | Victoria Hospital staff |
+| 🏥 Hospital | `hospital4` | `hospital123` | Sakra World Hospital staff |
+| 🏥 Hospital | `hospital5` | `hospital123` | Aster CMI Hospital staff |
+| 🏥 Hospital | `hospital6` | `hospital123` | Fortis Hospital staff |
+| 🏥 Hospital | `hospital7` | `hospital123` | Aster Whitefield staff |
 | 👨‍💼 Admin | `admin` | `admin123` | |
 
 Each hospital login can only manage bed capacity and acknowledge/prep
 patients for **their own** hospital - a `hospital2` login gets a 403 if it
-tries to touch Manipal's data, for example. Admin can manage all three.
+tries to touch Manipal's data, for example. Admin can manage all seven.
 
 ---
 
@@ -158,37 +150,25 @@ tries to touch Manipal's data, for example. Admin can manage all three.
 
 ### 🚦 Traffic Signal Control
 
-- **6 Junction Signals** across city network
-- **Automatic GREEN corridor** when ambulance approaches
+- **11 software signals** at real graph junctions across the Bengaluru network
+- **Route-aware GREEN corridor** - only signals on an active emergency route participate, when the ambulance approaches
 - **Manual override** by Police (auto-release after 30s)
 - **Real-time state sync** across all dashboards
 - **Software signal control engine** - models exactly what a real controller would do, no hardware required
 
-### 🔍 Dual Detection System
+### 🔐 Software Emergency Authorization
 
-**Camera Detection (Real YOLO26 model):**
-- Your trained model (`best.onnx`) runs real inference on uploaded/captured frames
-- Detects Ambulance, Misc Vehicle, and Siren (visual light bar) classes
-- Falls back to a simulated confidence value if no real frame is sent, so the demo never breaks
-- Threshold: ≥75% for verification
-
-**Siren Detection (Real FFT audio analysis):**
-- Genuine signal processing: sliding-window FFT, tracks dominant frequency in the siren band (500-1800 Hz), scores both in-band energy concentration and sweep periodicity
-- Falls back to a simulated frequency value if no real audio clip is sent
-- Threshold: ≥700 Hz (simulated) or a combined confidence score (real analysis)
-
-**Fail-Safe Logic:**
-- Emergency ON + (Camera OR Siren) = Verified
-- Both fail → Manual override mode active
-- Real-time status updates
+- Emergencies are created directly by the **authenticated ambulance operator**: select a hospital, provide patient information, press **ACTIVATE EMERGENCY**
+- Backend validates JWT + RBAC (driver/admin only), then creates the session: Dijkstra route → green corridor → hospital notification → police monitoring → live SSE updates
+- No camera, microphone, sensor, or hardware confirmation step exists anywhere in this flow
 
 ### 🎛️ Role-Based Dashboards
 
 #### 🚑 Driver Dashboard
-- Emergency activation button
-- Route selection (3 pre-computed routes)
-- Live GPS position on map
-- Detection status (Camera + Siren)
+- Emergency activation button (operator-initiated, JWT-authorized)
+- Hospital selection + route selection (Dijkstra-computed options)
+- Live ambulance position on map
+- Emergency status panel (SYSTEM READY / EMERGENCY ACTIVE with ETA, distance, route, corridor)
 - Traffic signal corridor status
 - Route progress tracker
 
@@ -237,12 +217,12 @@ tries to touch Manipal's data, for example. Admin can manage all three.
 - **React Router** - Navigation
 - **Lucide React** - Icons
 
-### Map & GPS
+### Map & Software Position Simulation
 - **Leaflet.js** - Map rendering
 - **OpenStreetMap** - Free map tiles
 - **Dark theme tiles** - CartoDB Dark Matter
-- **GPS coordinates** - Simulated Delhi locations
-- **Smooth interpolation** - Between waypoints
+- **Real Bengaluru coordinates** - Verified junctions, hospitals, and dispatch bases
+- **Smooth interpolation** - Software ambulance movement between route nodes
 
 ---
 
@@ -270,6 +250,7 @@ tries to touch Manipal's data, for example. Admin can manage all three.
 - `POST /api/emergency/start` - Start emergency session
 - `POST /api/emergency/stop` - Stop emergency session
 - `GET /api/routes` - Get available routes
+- `GET /api/graph` - Road graph (nodes, coordinates, edges) - single source of truth for clients
 
 ### Traffic Control
 - `POST /api/signal/override` - Manual signal override (Police only)
@@ -279,10 +260,6 @@ tries to touch Manipal's data, for example. Admin can manage all three.
 - `POST /api/roadblock` - Report a blocked road segment (Police/Admin) - triggers live Dijkstra rerouting
 - `DELETE /api/roadblock` - Reopen a previously reported road
 - `GET /api/roadblock` - List currently blocked segments
-
-### Detection
-- `POST /api/detect/camera` - Camera detection (real YOLO26 model if a frame is sent, simulated otherwise)
-- `POST /api/detect/siren` - Siren detection (real FFT audio analysis if a clip is sent, simulated otherwise)
 
 ### Patient & Hospital
 - `POST /api/emergency/:rid/acknowledge` - Hospital acknowledges an incoming emergency
@@ -298,23 +275,23 @@ tries to touch Manipal's data, for example. Admin can manage all three.
 
 ## 💻 Software-Only Architecture
 
-**This project has no hardware component.** Every part of AERIS — including traffic signal control — runs as software:
+**This project has no hardware component.** Every part of AERIS runs as software:
 
-- The "signal control engine" (`backend/signal-controller-sim.ts`) is a standalone Node.js service that receives signal commands over HTTP and tracks state, exactly like a real controller would, without requiring any physical device.
-- Camera detection uses your actual trained YOLO26 model, run on uploaded image frames — no physical camera required.
-- Siren detection uses real FFT audio analysis on uploaded WAV clips — no physical microphone required.
-
-If real signal hardware were ever added in the future, it would simply POST to the same `/signal` HTTP endpoint this software engine already exposes — but building or demonstrating that hardware is explicitly out of scope for this project.
+- The signal control engine (`backend/signal-controller-sim.ts`) is a standalone Node.js service that receives signal commands over HTTP and tracks virtual signal state. Signals shown in the UI (e.g. S1 = GREEN) are software state, not physical traffic lights.
+- Ambulance movement is a software route/movement simulation along Dijkstra-computed graph nodes — no GPS device or phone sensor input.
+- Emergency activation is a software authorization decision (authenticated operator + JWT/RBAC) — no camera, microphone, YOLO, ONNX, FFT, or sensor verification exists.
+- Only three services run: signal engine (:4001), backend API (:4000), frontend (:5173).
 
 ---
 
 ## 📊 System Specifications
 
-- **City Graph:** 8 nodes (junctions)
-- **Traffic Signals:** 6 controllable signals
-- **Route Options:** 3 pre-computed paths
+- **City Graph:** 21 nodes (junctions + hospital destinations)
+- **Traffic Signals:** 11 software signals at real graph junctions
+- **Hospitals:** 7 simulated destinations (Manipal, St. John's, Victoria, Sakra, Aster CMI, Fortis, Aster Whitefield)
+- **Route Options:** Dijkstra-optimal route plus a genuine alternate where the graph allows one
 - **Update Frequency:** 2 seconds
-- **GPS Precision:** 5 decimal places
+- **Coordinate Precision:** 5 decimal places (software simulation)
 - **Session Capacity:** Unlimited concurrent sessions
 - **Log Retention:** Last 100 entries
 

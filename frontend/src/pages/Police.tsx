@@ -12,25 +12,7 @@ import CopyableText from '../components/CopyableText';
 import { useStaircaseLoading, DashboardSkeleton } from '../components/SkeletonLoader';
 import Tooltip from '../components/Tooltip';
 import { soundManager } from '../utils/sound';
-
-// Adjacency mirrors backend CITY_GRAPH - kept here so the dropdown only ever
-// offers valid, actually-adjacent junction pairs (matches server-side validation).
-// Real Bengaluru road network: Indiranagar → Manipal Hospital, Old Airport Road.
-const CITY_GRAPH_JUNCTIONS: Record<string, string[]> = {
-  'Indiranagar Metro (Dispatch)':          ['100 Feet Road Junction', 'Domlur Flyover', 'Halasuru (Ulsoor)'],
-  '100 Feet Road Junction':                ['Indiranagar Metro (Dispatch)', 'Domlur Flyover'],
-  'Domlur Flyover':                        ['100 Feet Road Junction', 'Indiranagar Metro (Dispatch)', 'Kodihalli Junction', 'Marathahalli (ORR)'],
-  'Kodihalli Junction':                    ['Domlur Flyover', 'Manipal Hospital', 'Marathahalli (ORR)'],
-  'Marathahalli (ORR)':                    ['Domlur Flyover', 'Kodihalli Junction'],
-  'Manipal Hospital':                      ['Kodihalli Junction'],
-  'Halasuru (Ulsoor)':                     ['Indiranagar Metro (Dispatch)', 'Trinity Circle'],
-  'Trinity Circle':                        ['Halasuru (Ulsoor)', 'Victoria Hospital', 'Adugodi'],
-  'Victoria Hospital':                     ['Trinity Circle'],
-  'Adugodi':                               ['Trinity Circle', 'Silk Board Junction'],
-  'Silk Board Junction':                   ['Adugodi', "St. John's Medical College Hospital"],
-  "St. John's Medical College Hospital":   ['Silk Board Junction'],
-};
-const ALL_JUNCTIONS = Object.keys(CITY_GRAPH_JUNCTIONS);
+import { useGraph } from '../hooks/useGraph';
 
 const selectStyle: React.CSSProperties = {
   maxWidth: 220,
@@ -48,10 +30,24 @@ const Police: React.FC = () => {
   const { state, connected } = useSSE();
   const { toast } = useToast();
 
+  // Adjacency comes from the backend graph (single source of truth) so the
+  // roadblock dropdowns only ever offer valid, actually-adjacent pairs.
+  const { coords: nodeCoords, adjacency } = useGraph();
+  const ALL_JUNCTIONS = React.useMemo(() => Object.keys(adjacency), [adjacency]);
+
   const [blocked, setBlocked] = useState<[string, string][]>([]);
-  const [fromNode, setFromNode] = useState(ALL_JUNCTIONS[0]);
-  const [toNode, setToNode] = useState(CITY_GRAPH_JUNCTIONS[ALL_JUNCTIONS[0]][0]);
+  const [fromNode, setFromNode] = useState('');
+  const [toNode, setToNode] = useState('');
   const [roadblockLoading, setRoadblockLoading] = useState(false);
+
+  // Default the dropdowns once the backend graph arrives.
+  useEffect(() => {
+    if (!fromNode && ALL_JUNCTIONS.length > 0) {
+      const first = ALL_JUNCTIONS[0];
+      setFromNode(first);
+      setToNode(adjacency[first]?.[0] || '');
+    }
+  }, [ALL_JUNCTIONS, adjacency, fromNode]);
 
   const refreshRoadblocks = async () => {
     try {
@@ -62,7 +58,7 @@ const Police: React.FC = () => {
 
   useEffect(() => { refreshRoadblocks(); }, []);
 
-  // Audio alerts - a new active emergency plays the siren cue, a signal
+  // Audio alerts - a new active emergency plays the emergency alert cue, a signal
   // becoming contested plays a warning beep. Tracked via refs (not just
   // comparing to the previous render's props) so this only fires on a
   // genuine increase, not on every SSE update that happens to include
@@ -143,7 +139,7 @@ const Police: React.FC = () => {
   activeSessions.forEach(s => s.route.forEach(n => corridorJunctions.add(n)));
   // Monitored road segments, derived from the same adjacency the dropdowns use.
   const segmentKeys = new Set<string>();
-  Object.entries(CITY_GRAPH_JUNCTIONS).forEach(([a, bs]) => bs.forEach(b => segmentKeys.add([a, b].sort().join('|'))));
+  Object.entries(adjacency).forEach(([a, bs]) => bs.forEach(b => segmentKeys.add([a, b].sort().join('|'))));
 
   return (
     <>
@@ -193,12 +189,16 @@ const Police: React.FC = () => {
             <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {activeSessions.map(s => {
                 const left = s.route.length - 1 - s.currentNodeIndex;
+                // Route-scoped corridor: signals on THIS ambulance's route that
+                // are currently GREEN (backend owns corridor membership).
+                const routeSigs = state.signals.filter(sig => s.route.includes(sig.junction));
+                const routeGreen = routeSigs.filter(sig => sig.color === 'GREEN').length;
                 return (
                   <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                     <CopyableText value={s.rid} className="mono font-semibold" style={{ color: 'var(--c-red-bright)', fontSize: '0.9rem' }} />
                     <span className="text-xs text-muted">Destination: <strong style={{ color: 'var(--text-primary)' }}>{s.hospital.name}</strong></span>
                     <span className="text-xs text-muted">Route: {s.route.length} nodes</span>
-                    <span className="text-xs text-muted">Signals prioritized: <strong style={{ color: 'var(--green-dark)' }}>{greenCount}</strong></span>
+                    <span className="text-xs text-muted">Corridor: <strong style={{ color: 'var(--green-dark)' }}>GREEN {routeGreen}/{routeSigs.length}</strong></span>
                     <span className="text-xs text-muted">ETA: <strong className="mono" style={{ color: 'var(--c-yellow)' }}>{left * 2}m</strong></span>
                   </div>
                 );
@@ -263,9 +263,10 @@ const Police: React.FC = () => {
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      {session.cameraDetected && <StatusPulse status="active" label="CAM" size="sm" />}
-                      {session.sirenDetected  && <StatusPulse status="active" label="SIREN" size="sm" />}
-                      {!session.isVerified    && <StatusPulse status="warning" label="FAILSAFE" size="sm" />}
+                      <StatusPulse status="active" label={session.patient.severity.toUpperCase()} size="sm" />
+                      {session.hospitalAcknowledged
+                        ? <StatusPulse status="active" label="HOSP ACK'D" size="sm" />
+                        : <StatusPulse status="warning" label="AWAITING HOSP" size="sm" />}
                     </div>
                   </div>
                 );
@@ -278,21 +279,11 @@ const Police: React.FC = () => {
         {activeSessions.length > 0 && (
           <div className="card mb-4 animate-fade-up">
             <div className="section-title">Live City Map — {activeSessions.length} Active Emergency</div>
-            <InteractiveMap 
-              sessions={state.sessions} 
-              signals={state.signals.map(s => {
-                const junctionCoords: Record<string, [number, number]> = {
-                  '100 Feet Road Junction': [12.9719, 77.6412],
-                  'Domlur Flyover': [12.9604, 77.6417],
-                  'Kodihalli Junction': [12.9601, 77.6472],
-                  'Marathahalli (ORR)': [12.9562, 77.7019],
-                  'Halasuru (Ulsoor)': [12.9757, 77.6263],
-                  'Trinity Circle': [12.9730, 77.6170],
-                  'Adugodi': [12.9435, 77.6091],
-                };
-                const [lat, lng] = junctionCoords[s.junction] || [12.9786, 77.6388];
-                return { id: s.id, name: s.name, color: s.color, lat, lng };
-              })} 
+            <InteractiveMap
+              sessions={state.sessions}
+              signals={state.signals}
+              hospitals={state.hospitals}
+              nodeCoords={nodeCoords}
               centerOnAmbulance={false}
               showTraffic={true}
               showLegend={true}
@@ -379,13 +370,13 @@ const Police: React.FC = () => {
               <select value={fromNode} onChange={e => {
                 const next = e.target.value;
                 setFromNode(next);
-                setToNode(CITY_GRAPH_JUNCTIONS[next][0]);
+                setToNode(adjacency[next]?.[0] || '');
               }} style={selectStyle} aria-label="Blocked segment start junction">
                 {ALL_JUNCTIONS.map(j => <option key={j} value={j}>{j}</option>)}
               </select>
               <span className="text-muted">→</span>
               <select value={toNode} onChange={e => setToNode(e.target.value)} style={selectStyle} aria-label="Blocked segment end junction">
-                {CITY_GRAPH_JUNCTIONS[fromNode].map(j => <option key={j} value={j}>{j}</option>)}
+                {(adjacency[fromNode] || []).map(j => <option key={j} value={j}>{j}</option>)}
               </select>
               <button
                 onClick={handleReportRoadblock}

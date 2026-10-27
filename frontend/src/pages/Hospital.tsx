@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, BedDouble, CheckCheck, Siren, PhoneCall, MapPin, Plus, Minus } from 'lucide-react';
+import { Activity, BedDouble, CheckCheck, Ambulance, PhoneCall, MapPin, Plus, Minus } from 'lucide-react';
 import { useSSE } from '../hooks/usePoll';
 import Nav from '../components/Nav';
 import InteractiveMap from '../components/InteractiveMap';
@@ -10,6 +10,8 @@ import { LiveBadge, AnimatedProgress, CircularProgress, StatusPulse } from '../c
 import CopyableText from '../components/CopyableText';
 import Tooltip from '../components/Tooltip';
 import { useStaircaseLoading, DashboardSkeleton } from '../components/SkeletonLoader';
+import { useGraph } from '../hooks/useGraph';
+import { useAuth } from '../context/AuthContext';
 import VitalsMonitor from '../components/VitalsMonitor';
 import { soundManager } from '../utils/sound';
 
@@ -29,6 +31,12 @@ const Hospital: React.FC = () => {
   const [selectedRID, setSelectedRID] = useState<string | null>(null);
   const [hospitals, setHospitals] = useState<HospitalType[]>([]);
   const [savingBeds, setSavingBeds] = useState<string | null>(null);
+  const { coords: nodeCoords } = useGraph();
+  const { user } = useAuth();
+  // This login's OWN hospital (hospital-role only; admin has none and may
+  // act on any session). Sessions bound for other hospitals are observable
+  // here but not actionable - ownership is enforced server-side regardless.
+  const myHospitalId = user?.hospitalId;
 
   useEffect(() => {
     const loadHospitals = async () => {
@@ -113,6 +121,10 @@ const Hospital: React.FC = () => {
   // replaces the old hardcoded/derived fake checklist.
   const checklist = session?.prepTasks ?? [];
 
+  // Ownership scope: a hospital login may only acknowledge/prep sessions
+  // bound for its OWN hospital (admin has no hospitalId: unrestricted).
+  const isMineFor = (s: AmbulanceSession) => !myHospitalId || s.hospital.id === myHospitalId;
+
   const loadStage = useStaircaseLoading(!state);
 
   if (!state) return (
@@ -178,7 +190,7 @@ const Hospital: React.FC = () => {
               <>
                 {/* Inbound hero: ambulance, route position, ETA, status */}
                 <div className="card card-emergency mb-4 animate-fade-in" style={{ borderColor: 'rgba(239,68,68,0.45)', padding: '1.5rem' }}>
-                  <div className="section-title mb-3"><Siren size={15} color="var(--c-red)" /> Inbound Ambulance</div>
+                  <div className="section-title mb-3"><Ambulance size={15} color="var(--c-red)" /> Inbound Ambulance</div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
                     <CopyableText value={session.rid} className="mono font-extrabold" style={{ fontSize: '2rem', color: 'var(--c-red-bright)', letterSpacing: 2 }} />
                     <span className={`status-badge ${etaMins > 0 ? 'badge-red' : 'badge-green'}`}>{etaMins > 0 ? 'INBOUND' : 'ARRIVING'}</span>
@@ -209,8 +221,9 @@ const Hospital: React.FC = () => {
                   <div className="flex gap-2" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
                     <span className="status-badge badge-red">Priority 1</span>
                     <span className="status-badge badge-yellow">Green Corridor</span>
-                    {session.cameraDetected && <StatusPulse status="active" label="CAM" size="sm" />}
-                    {session.sirenDetected  && <StatusPulse status="active" label="SIREN" size="sm" />}
+                    {session.hospitalAcknowledged
+                      ? <StatusPulse status="active" label="ACK'D" size="sm" />
+                      : <StatusPulse status="warning" label="UNACKNOWLEDGED" size="sm" />}
                     <span className="text-xs text-muted" style={{ marginLeft: 'auto' }}>Severity (from intake): <strong style={{ color: SEV_COLORS[sev] }}>{sev.toUpperCase()}</strong></span>
                   </div>
                 </div>
@@ -220,9 +233,11 @@ const Hospital: React.FC = () => {
                   <div className="flex flex-col gap-4">
                     <div className="card animate-fade-up">
                       <div className="section-title"><MapPin size={14} /> Live Unit Position</div>
-                      <InteractiveMap 
-                        sessions={[session]} 
-                        signals={[]} 
+                      <InteractiveMap
+                        sessions={[session]}
+                        signals={[]}
+                        hospitals={state?.hospitals || []}
+                        nodeCoords={nodeCoords}
                         centerOnAmbulance={true}
                         showTraffic={false}
                         showLegend={true}
@@ -263,28 +278,39 @@ const Hospital: React.FC = () => {
                             color="var(--green)"
                           />
                           {!session.hospitalAcknowledged
-                            ? <Tooltip label="Confirm your hospital has seen this incoming emergency"><button onClick={() => handleAcknowledge(session.rid)} className="btn btn-success btn-sm">Acknowledge Inbound</button></Tooltip>
+                            ? (isMineFor(session)
+                              ? <Tooltip label="Confirm your hospital has seen this incoming emergency"><button onClick={() => handleAcknowledge(session.rid)} className="btn btn-success btn-sm">Acknowledge Inbound</button></Tooltip>
+                              : <Tooltip label={`Bound for ${session.hospital.name} — only that hospital can acknowledge`}><button className="btn btn-ghost btn-sm" disabled style={{ opacity: 0.5, cursor: 'not-allowed' }}>Not Your Inbound</button></Tooltip>)
                             : <StatusPulse status="active" label="ACK'D" size="md" />
                           }
                         </div>
                       </div>
                       {!session.hospitalAcknowledged ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', marginBottom: 8, background: 'rgba(255,149,0,0.08)', border: '1px solid rgba(255,149,0,0.25)', borderRadius: 12, fontSize: '0.78rem', fontWeight: 700, color: 'var(--orange-dark)' }}>
-                          ⚠ ACTION REQUIRED — Incoming emergency requires acknowledgement.
-                        </div>
+                        isMineFor(session) ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', marginBottom: 8, background: 'rgba(255,149,0,0.08)', border: '1px solid rgba(255,149,0,0.25)', borderRadius: 12, fontSize: '0.78rem', fontWeight: 700, color: 'var(--orange-dark)' }}>
+                            ⚠ ACTION REQUIRED — Incoming emergency requires acknowledgement.
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', marginBottom: 8, background: 'rgba(0,0,0,0.03)', border: '1px solid rgba(0,0,0,0.08)', borderRadius: 12, fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-tertiary)' }}>
+                            OBSERVING — Bound for {session.hospital.name}; acknowledgement belongs to that hospital.
+                          </div>
+                        )
                       ) : (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', marginBottom: 8, background: 'rgba(52,199,89,0.07)', border: '1px solid rgba(52,199,89,0.2)', borderRadius: 12, fontSize: '0.78rem', fontWeight: 700, color: 'var(--green-dark)' }}>
                           ✓ INBOUND ACKNOWLEDGED — Hospital has acknowledged the incoming ambulance.
                         </div>
                       )}
-                      {checklist.map((item) => (
-                        <div key={item.id} onClick={() => handleTogglePrep(session.rid, item.id, item.done)}
-                          className="flex items-center gap-3 p-2" style={{ borderBottom: '1px solid rgba(0,0,0,0.06)', cursor: 'pointer' }}>
-                          <CheckCheck size={15} color={item.done ? 'var(--c-green)' : '#2a3958'} />
-                          <span className="text-sm flex-1" style={{ color: item.done ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>{item.label}</span>
-                          {!item.done && <span className="text-xs text-quiet">Tap to mark done</span>}
-                        </div>
-                      ))}
+                      {checklist.map((item) => {
+                        const actionable = isMineFor(session);
+                        return (
+                          <div key={item.id} onClick={() => actionable && handleTogglePrep(session.rid, item.id, item.done)}
+                            className="flex items-center gap-3 p-2" style={{ borderBottom: '1px solid rgba(0,0,0,0.06)', cursor: actionable ? 'pointer' : 'default', opacity: actionable ? 1 : 0.6 }}>
+                            <CheckCheck size={15} color={item.done ? 'var(--c-green)' : '#2a3958'} />
+                            <span className="text-sm flex-1" style={{ color: item.done ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>{item.label}</span>
+                            {!item.done && actionable && <span className="text-xs text-quiet">Tap to mark done</span>}
+                          </div>
+                        );
+                      })}
                     </div>
 
                     {/* Live Patient Vitals - so hospital staff can prep based
@@ -308,7 +334,7 @@ const Hospital: React.FC = () => {
                           ['Emergency',      session.patient?.requiredDepartment || 'General Emergency'],
                           ['Severity',       sev.toUpperCase()],
                           ['Ambulance',      session.rid],
-                          ['Verified',       session.isVerified ? 'Yes (Dual sensor)' : 'Fail-safe'],
+                          ['Emergency state', session.status === 'active' ? 'Active (operator-authorized)' : session.status],
                           ['Acknowledged',   session.hospitalAcknowledged ? 'Yes' : 'Pending'],
                           ['Prep Progress',  `${checklist.filter(c => c.done).length}/${checklist.length} tasks`],
                         ].map(([k, v]) => (
@@ -335,25 +361,28 @@ const Hospital: React.FC = () => {
               const pct = h.totalBeds > 0 ? (h.availableBeds / h.totalBeds) * 100 : 0;
               const occupied = h.totalBeds - h.availableBeds;
               const color = h.availableBeds === 0 ? 'var(--red-bright)' : pct <= 15 ? 'var(--orange)' : 'var(--green)';
+              // Bed controls are scoped to this login's own hospital
+              // (admin: all). Other hospitals' counts are read-only here.
+              const bedsMine = !myHospitalId || h.id === myHospitalId;
               return (
                 <div key={h.id} style={{ padding: '12px 14px', borderRadius: 12, background: 'rgba(0,0,0,0.02)', border: '1px solid rgba(0,0,0,0.05)' }}>
-                  <div className="text-sm font-semibold mb-1">{h.name}</div>
+                  <div className="text-sm font-semibold mb-1">{h.name}{!bedsMine && <span className="text-xs text-quiet" style={{ marginLeft: 8 }}>read-only</span>}</div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
                     <span style={{ fontWeight: 800, fontSize: '1.6rem', color }}>{h.availableBeds}</span>
                     <span className="text-xs text-quiet">AVAILABLE</span>
                     <span className="text-xs text-muted" style={{ marginLeft: 'auto' }}>{occupied} occupied · {h.totalBeds} total</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <Tooltip label="Decrease available beds">
-                      <button onClick={() => handleBedUpdate(h.id, -1)} disabled={savingBeds === h.id || h.availableBeds <= 0} className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }}>
+                    <Tooltip label={bedsMine ? 'Decrease available beds' : 'Only that hospital can edit its beds'}>
+                      <button onClick={() => handleBedUpdate(h.id, -1)} disabled={!bedsMine || savingBeds === h.id || h.availableBeds <= 0} className="btn btn-ghost btn-sm" style={{ padding: '4px 8px', opacity: bedsMine ? 1 : 0.4 }}>
                         <Minus size={12} />
                       </button>
                     </Tooltip>
                     <div style={{ flex: 1, height: 5, borderRadius: 3, background: 'rgba(0,0,0,0.06)', overflow: 'hidden' }}>
                       <div style={{ height: '100%', width: `${pct}%`, background: color, transition: 'width 0.3s ease' }} />
                     </div>
-                    <Tooltip label="Increase available beds">
-                      <button onClick={() => handleBedUpdate(h.id, 1)} disabled={savingBeds === h.id || h.availableBeds >= h.totalBeds} className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }}>
+                    <Tooltip label={bedsMine ? 'Increase available beds' : 'Only that hospital can edit its beds'}>
+                      <button onClick={() => handleBedUpdate(h.id, 1)} disabled={!bedsMine || savingBeds === h.id || h.availableBeds >= h.totalBeds} className="btn btn-ghost btn-sm" style={{ padding: '4px 8px', opacity: bedsMine ? 1 : 0.4 }}>
                         <Plus size={12} />
                       </button>
                     </Tooltip>

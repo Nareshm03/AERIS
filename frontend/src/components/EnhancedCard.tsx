@@ -1,34 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 
-interface EnhancedCardProps {
-  children: React.ReactNode;
-  variant?: 'default' | 'premium' | 'glow' | 'metric' | 'status';
-  className?: string;
-  style?: React.CSSProperties;
-  onClick?: () => void;
-}
-
-export const EnhancedCard: React.FC<EnhancedCardProps> = ({ 
-  children, 
-  variant = 'default', 
-  className = '', 
-  style,
-  onClick 
-}) => {
-  const variantClass = variant === 'default' ? 'card' : `card-${variant}`;
-  
-  return (
-    <div 
-      className={`${variantClass} ${className}`} 
-      style={style}
-      onClick={onClick}
-    >
-      {children}
-    </div>
-  );
-};
-
 interface GlassCardProps {
   children: React.ReactNode;
   icon?: React.ReactNode;

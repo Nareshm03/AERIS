@@ -38,23 +38,8 @@ if "!SIGNAL_STATUS!"=="200" (
 )
 echo.
 
-REM Check detection microservice
-echo 3. Checking Detection Service :8001...
-curl -s -o NUL -w "%%{http_code}" http://localhost:8001/health > temp_status.txt 2>NUL
-set /p DETECT_STATUS=<temp_status.txt
-del temp_status.txt 2>NUL
-
-if "!DETECT_STATUS!"=="200" (
-    echo    [OK] Detection service is running on port 8001
-) else (
-    echo    [ERROR] Detection service is NOT running
-    echo    Start with: cd backend ^&^& python -m uvicorn app:app --host 0.0.0.0 --port 8001
-    echo    (requires: python -m pip install -r backend\requirements.txt)
-)
-echo.
-
 REM Check if frontend is running
-echo 4. Checking Frontend :5173...
+echo 3. Checking Frontend :5173...
 curl -s -o NUL -w "%%{http_code}" http://localhost:5173 > temp_status.txt 2>NUL
 set /p FRONTEND_STATUS=<temp_status.txt
 del temp_status.txt 2>NUL
@@ -68,7 +53,7 @@ if "!FRONTEND_STATUS!"=="200" (
 echo.
 
 REM Check routes endpoint
-echo 5. Checking Routes API...
+echo 4. Checking Routes API...
 curl -s http://localhost:4000/api/routes/computed > temp_routes.txt 2>NUL
 findstr /C:"path" temp_routes.txt >NUL 2>&1
 if %ERRORLEVEL%==0 (
@@ -80,8 +65,8 @@ del temp_routes.txt 2>NUL
 echo.
 
 REM Check if ports are in use
-echo 6. Checking Ports...
-for %%P in (4000 4001 8001 5173) do (
+echo 5. Checking Ports...
+for %%P in (4000 4001 5173) do (
     netstat -an | findstr ":%%P" | findstr "LISTENING" >NUL 2>&1
     if !ERRORLEVEL!==0 (
         echo    [OK] Port %%P is listening
@@ -92,7 +77,7 @@ for %%P in (4000 4001 8001 5173) do (
 echo.
 
 REM Check Node.js version
-echo 7. Checking Node.js...
+echo 6. Checking Node.js...
 where node >NUL 2>&1
 if %ERRORLEVEL%==0 (
     for /f "tokens=*" %%i in ('node --version') do set NODE_VERSION=%%i
@@ -102,24 +87,13 @@ if %ERRORLEVEL%==0 (
 )
 echo.
 
-REM Check Python version
-echo 8. Checking Python...
-where python >NUL 2>&1
-if %ERRORLEVEL%==0 (
-    for /f "tokens=*" %%i in ('python --version 2^>^&1') do set PY_VERSION=%%i
-    echo    [OK] !PY_VERSION! ^(need 3.10+ for detection service^)
-) else (
-    echo    [ERROR] Python not installed - detection service :8001 cannot run
-)
-echo.
-
 REM Summary
 echo ========================================
 echo   Summary
 echo ========================================
 echo.
 
-if "!BACKEND_STATUS!"=="200" if "!FRONTEND_STATUS!"=="200" if "!SIGNAL_STATUS!"=="200" if "!DETECT_STATUS!"=="200" (
+if "!BACKEND_STATUS!"=="200" if "!FRONTEND_STATUS!"=="200" if "!SIGNAL_STATUS!"=="200" (
     echo [OK] Full stack is running correctly!
     echo.
     echo Next steps:
@@ -138,19 +112,15 @@ if "!BACKEND_STATUS!"=="200" if "!FRONTEND_STATUS!"=="200" if "!SIGNAL_STATUS!"=
     echo.
     echo Or start each service manually:
     echo.
-    echo Terminal 1 ^(Detection :8001^):
-    echo   cd backend
-    echo   python -m uvicorn app:app --host 0.0.0.0 --port 8001
-    echo.
-    echo Terminal 2 ^(Signals :4001^):
+    echo Terminal 1 ^(Signals :4001^):
     echo   cd backend
     echo   npm run dev:signals
     echo.
-    echo Terminal 3 ^(Backend :4000^):
+    echo Terminal 2 ^(Backend :4000^):
     echo   cd backend
     echo   npm run dev
     echo.
-    echo Terminal 4 ^(Frontend :5173^):
+    echo Terminal 3 ^(Frontend :5173^):
     echo   cd frontend
     echo   npm run dev
 )

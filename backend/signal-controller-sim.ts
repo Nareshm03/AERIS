@@ -28,7 +28,21 @@ interface SignalRecord {
   commandsReceived: number;
 }
 
-const KNOWN_SIGNALS = ['Signal A', 'Signal B', 'Signal C', 'Signal D', 'Signal E', 'Signal F'];
+// Every entry mirrors a real backend signal `name` (see server.ts `signals`)
+// so the engine never shows phantom signals outside the AERIS graph.
+const KNOWN_SIGNALS = [
+  'Signal — 100 Feet Road Jn',
+  'Signal — Domlur Flyover',
+  'Signal — Kodihalli Jn',
+  'Signal — Marathahalli',
+  'Signal — Halasuru (Ulsoor)',
+  'Signal — Trinity Circle',
+  'Signal — Adugodi',
+  'Signal — Devarabeesanahalli',
+  'Signal — Whitefield / ITPL',
+  'Signal — Cunningham Road',
+  'Signal — Hebbal',
+];
 
 const signalStates: Record<string, SignalRecord> = {};
 
@@ -81,8 +95,13 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'online', ts: new Date().toISOString() });
 });
 
-app.listen(4001, () => {
-  console.log('\n✅ Signal Control Engine: http://localhost:4001');
+// Loopback-only: this engine accepts unauthenticated state-changing
+// commands (POST /signal), so it must not be reachable from the LAN.
+// Its only callers are the local backend (SIGNAL_ENGINE_URL, default
+// http://localhost:4001) and same-machine browser health probes - both
+// work unchanged over loopback.
+app.listen(4001, '127.0.0.1', () => {
+  console.log('\n✅ Signal Control Engine: http://localhost:4001 (loopback-only)');
   console.log('   POST /signal   — receive signal commands');
   console.log('   GET  /status   — current signal states');
   console.log('   GET  /health   — engine ping\n');

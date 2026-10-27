@@ -22,15 +22,49 @@ const ROLES = [
     caps: ['Fleet oversight', 'Incident history', 'System control'] },
 ];
 
-// Static readiness indicators: real AERIS capabilities, stated as system
-// facts (no live telemetry is available to the entry page, so no numbers
-// are invented - just what each subsystem is and that it is ready).
-const READINESS = [
-  { icon: <ShieldCheck size={14} strokeWidth={2.5} />, name: 'Authentication', detail: 'JWT + bcrypt', state: 'OPERATIONAL', color: '#557563' },
-  { icon: <Zap size={14} strokeWidth={2.5} />,         name: 'Routing Engine', detail: 'Dijkstra',      state: 'READY',       color: '#3A5269' },
-  { icon: <Wifi size={14} strokeWidth={2.5} />,        name: 'Real-time',      detail: 'SSE',           state: 'CONNECTED',   color: '#8A6835' },
-  { icon: <Cpu size={14} strokeWidth={2.5} />,         name: 'Signal Control', detail: 'Engine',        state: 'ONLINE',      color: '#6F6096' },
-];
+// Readiness indicators, each backed by a live probe (no invented states):
+// - Authentication + Routing Engine: the backend API itself answers
+//   /api/routes/computed (same Express app serves /api/auth/login).
+// - Real-time: GET /api/stream without a token returns 401, which still
+//   proves the SSE route is alive; only a network failure means OFFLINE.
+// - Signal Control: the signal engine answers GET /health on :4001.
+const READINESS_DEFS = [
+  { key: 'auth',    icon: <ShieldCheck size={14} strokeWidth={2.5} />, name: 'Authentication', detail: 'JWT + bcrypt', color: '#557563' },
+  { key: 'routing', icon: <Zap size={14} strokeWidth={2.5} />,         name: 'Routing Engine', detail: 'Dijkstra',      color: '#3A5269' },
+  { key: 'realtime', icon: <Wifi size={14} strokeWidth={2.5} />,       name: 'Real-time',      detail: 'SSE',           color: '#8A6835' },
+  { key: 'signals', icon: <Cpu size={14} strokeWidth={2.5} />,         name: 'Signal Control', detail: 'Engine :4001',  color: '#6F6096' },
+] as const;
+
+type ProbeState = 'checking' | 'online' | 'offline';
+
+function useServiceProbes() {
+  const [backend, setBackend] = React.useState<ProbeState>('checking');
+  const [sse, setSse] = React.useState<ProbeState>('checking');
+  const [signals, setSignals] = React.useState<ProbeState>('checking');
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const probe = async (url: string, set: (s: ProbeState) => void) => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 4000);
+      try {
+        // Any HTTP response (even 401) proves the service is reachable.
+        await fetch(url, { signal: ctrl.signal });
+        if (!cancelled) set('online');
+      } catch {
+        if (!cancelled) set('offline');
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+    probe('http://localhost:4000/api/routes/computed', setBackend);
+    probe('http://localhost:4000/api/stream', setSse);
+    probe('http://localhost:4001/health', setSignals);
+    return () => { cancelled = true; };
+  }, []);
+
+  return { backend, sse, signals };
+}
 
 const Login: React.FC = () => {
   const navigate       = useNavigate();
@@ -41,7 +75,16 @@ const Login: React.FC = () => {
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState('');
+  const [error, setError] = useState('');
+  const probes = useServiceProbes();
+  const backendUp = probes.backend === 'online';
+
+  const ON_LABEL: Record<string, string> = { auth: 'OPERATIONAL', routing: 'READY', realtime: 'AVAILABLE', signals: 'ONLINE' };
+  const readiness = READINESS_DEFS.map(d => {
+    const state: ProbeState = d.key === 'signals' ? probes.signals : d.key === 'realtime' ? probes.sse : probes.backend;
+    const label = state === 'checking' ? 'CHECKING' : state === 'online' ? ON_LABEL[d.key] : 'OFFLINE';
+    return { ...d, state, label };
+  });
 
   const selectedDef = ROLES.find(r => r.key === selectedRole);
 
@@ -197,17 +240,17 @@ const Login: React.FC = () => {
           <div style={{
             display: 'flex', alignItems: 'center', gap: 8,
             padding: '8px 16px', borderRadius: 20,
-            background: 'rgba(110,148,129,0.12)',
-            border: '1.5px solid rgba(110,148,129,0.35)',
+            background: probes.backend === 'offline' ? 'rgba(255,59,92,0.1)' : 'rgba(110,148,129,0.12)',
+            border: `1.5px solid ${probes.backend === 'offline' ? 'rgba(255,59,92,0.35)' : 'rgba(110,148,129,0.35)'}`,
             fontSize: '0.72rem', fontWeight: 800, letterSpacing: '1px',
-            color: '#557563',
-          }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#34C759' }} />
-            SYSTEM ONLINE
+            color: probes.backend === 'offline' ? 'var(--c-red)' : '#557563',
+          }} title="Live backend reachability probe">
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: probes.backend === 'checking' ? '#C89B5C' : probes.backend === 'online' ? '#34C759' : 'var(--c-red)' }} />
+            {probes.backend === 'checking' ? 'CHECKING SYSTEM' : probes.backend === 'online' ? 'SYSTEM ONLINE' : 'BACKEND OFFLINE'}
           </div>
         </div>
 
-        {/* ── 2. LIVE SYSTEM STATUS (readiness panel, static capability facts) ── */}
+        {/* ── 2. LIVE SYSTEM STATUS (every state backed by a live probe) ── */}
         <div className="card" style={{ padding: '1rem 1.5rem', marginBottom: 28 }}>
           <div style={{
             fontSize: '0.7rem', fontWeight: 800, letterSpacing: '2px',
@@ -222,24 +265,28 @@ const Login: React.FC = () => {
             gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
             gap: 12,
           }}>
-            {READINESS.map(r => (
-              <div key={r.name} style={{
-                display: 'flex', alignItems: 'center', gap: 12,
-                padding: '10px 14px', borderRadius: 14,
-                background: 'rgba(0,0,0,0.025)',
-                border: '1px solid rgba(0,0,0,0.06)',
-              }}>
-                <span style={{ color: r.color, display: 'flex' }}>{r.icon}</span>
-                <span style={{ flex: 1 }}>
-                  <span style={{ display: 'block', fontSize: '0.78rem', fontWeight: 800, color: '#241F2B' }}>{r.name}</span>
-                  <span className="mono" style={{ display: 'block', fontSize: '0.7rem', color: '#5C5568' }}>{r.detail}</span>
-                </span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.8px', color: '#557563' }}>
-                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#34C759' }} />
-                  {r.state}
-                </span>
-              </div>
-            ))}
+            {readiness.map(r => {
+              const dot = r.state === 'checking' ? '#C89B5C' : r.state === 'online' ? '#34C759' : 'var(--c-red)';
+              const tone = r.state === 'offline' ? 'var(--c-red)' : '#557563';
+              return (
+                <div key={r.name} style={{
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  padding: '10px 14px', borderRadius: 14,
+                  background: 'rgba(0,0,0,0.025)',
+                  border: '1px solid rgba(0,0,0,0.06)',
+                }}>
+                  <span style={{ color: r.color, display: 'flex' }}>{r.icon}</span>
+                  <span style={{ flex: 1 }}>
+                    <span style={{ display: 'block', fontSize: '0.78rem', fontWeight: 800, color: '#241F2B' }}>{r.name}</span>
+                    <span className="mono" style={{ display: 'block', fontSize: '0.7rem', color: '#5C5568' }}>{r.detail}</span>
+                  </span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.8px', color: tone }}>
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: dot }} />
+                    {r.label}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -350,9 +397,9 @@ const Login: React.FC = () => {
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                     paddingTop: 10, borderTop: '1px solid rgba(0,0,0,0.06)',
                   }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.65rem', fontWeight: 800, letterSpacing: '1px', color: '#557563' }}>
-                      <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#34C759' }} />
-                      READY
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.65rem', fontWeight: 800, letterSpacing: '1px', color: backendUp ? '#557563' : 'var(--c-red)' }}>
+                      <span style={{ width: 7, height: 7, borderRadius: '50%', background: backendUp ? '#34C759' : 'var(--c-red)' }} />
+                      {backendUp ? 'READY' : probes.backend === 'checking' ? 'CHECKING' : 'OFFLINE'}
                     </span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.72rem', fontWeight: 800, color: selectedRole === role.key ? role.color : '#5C5568', letterSpacing: '0.5px' }}>
                       ENTER <ChevronRight size={14} />
@@ -395,7 +442,7 @@ const Login: React.FC = () => {
               </div>
               {[
                 { group: 'Core', rows: [['Authentication', 'JWT + bcrypt'], ['Routing', 'Dijkstra'], ['Real-time', 'SSE']] },
-                { group: 'Intelligence', rows: [['Detection', 'YOLO + FFT'], ['Verification', 'Camera + Siren']] },
+                { group: 'Intelligence', rows: [['Corridor', 'Green-wave signals'], ['Coordination', 'Hospital + Police']] },
                 { group: 'Infrastructure', rows: [['Sessions', 'Multi-ambulance'], ['Backend', 'Node + TypeScript'], ['Architecture', 'Software-only']] },
               ].map(g => (
                 <div key={g.group} style={{ marginBottom: 10 }}>
@@ -552,7 +599,7 @@ const Login: React.FC = () => {
                       gap: 6,
                     }}>
                       <Zap size={12} strokeWidth={2.5} style={{ color: '#46617F' }} />
-                      Fast Login
+                      JWT Session
                     </div>
                     <div style={{
                       padding: '6px 14px',

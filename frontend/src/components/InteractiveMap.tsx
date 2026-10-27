@@ -2,9 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Activity } from 'lucide-react';
-import type { AmbulanceSession } from '../api';
+import type { AmbulanceSession, Hospital } from '../api';
 
-// Fix Leaflet default marker icons
+ // Fix Leaflet default marker icons
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
@@ -15,15 +15,23 @@ L.Icon.Default.mergeOptions({
 interface InteractiveMapProps {
   sessions: AmbulanceSession[];
   signals?: Array<{ id: string; name: string; color: string; lat: number; lng: number }>;
+  // Backend-owned data: hospital destinations (with coordinates) and the
+  // node → coordinate lookup both come from the server, never hard-coded here.
+  hospitals?: Hospital[];
+  nodeCoords?: Record<string, [number, number]>;
   centerOnAmbulance?: boolean;
   showTraffic?: boolean;
   showLegend?: boolean;
   height?: string;
 }
 
+const FALLBACK_COORD: [number, number] = [12.9786, 77.6388];
+
 const InteractiveMap: React.FC<InteractiveMapProps> = ({
   sessions,
   signals = [],
+  hospitals = [],
+  nodeCoords = {},
   centerOnAmbulance = true,
   showLegend = true,
   height = '500px',
@@ -106,11 +114,12 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
-    // Create map centered on central Bengaluru - covers the full network
-    // from Indiranagar (north-east) down to Silk Board Junction (south)
+    // Create map centered on the Bengaluru network - Indiranagar (east)
+    // through the central corridor, Whitefield (far east), Hebbal (north)
+    // and Silk Board Junction (south)
     const map = L.map(mapContainerRef.current, {
-      center: [12.9480, 77.6300],
-      zoom: 12,
+      center: [12.9750, 77.6600],
+      zoom: 11,
       zoomControl: true,
       attributionControl: true,
     });
@@ -143,14 +152,33 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({
       }, 2500);
     });
 
-    // Add real hospital markers (Section 6: multiple real hospitals, not
-    // a single hardcoded destination)
-    const REAL_HOSPITALS: { name: string; lat: number; lng: number; address: string }[] = [
-      { name: 'Manipal Hospital', lat: 12.9588, lng: 77.6491, address: 'Old Airport Road, Kodihalli' },
-      { name: "St. John's Medical College Hospital", lat: 12.9293, lng: 77.6201, address: 'Sarjapur Road, Koramangala' },
-      { name: 'Victoria Hospital', lat: 12.9634, lng: 77.5738, address: 'Fort Road, Bengaluru' },
-    ];
-    REAL_HOSPITALS.forEach(h => {
+    return () => {
+      if (resumeTimerRef.current) { clearTimeout(resumeTimerRef.current); resumeTimerRef.current = null; }
+      map.remove();
+      mapRef.current = null;
+    };
+  }, []);
+
+  // Hospital destination markers come from the backend hospital list (with
+  // server-provided coordinates) - never a hard-coded list in this file.
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return;
+    const map = mapRef.current;
+
+    // Remove markers for hospitals no longer in the list
+    hospitalMarkersRef.current.forEach((marker, id) => {
+      if (!hospitals.find(h => h.id === id)) {
+        marker.remove();
+        hospitalMarkersRef.current.delete(id);
+      }
+    });
+
+    hospitals.forEach(h => {
+      const existing = hospitalMarkersRef.current.get(h.id);
+      if (existing) {
+        existing.setLatLng([h.lat, h.lng]);
+        return;
+      }
       const marker = L.marker([h.lat, h.lng], { icon: hospitalIcon })
         .addTo(map)
         .bindPopup(`
@@ -159,22 +187,16 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({
               🏥 ${h.name}
             </div>
             <div style="font-size: 13px; color: #6b7280; margin-bottom: 4px;">
-              ${h.address}
+              ${h.area}
             </div>
             <div style="font-size: 12px; color: #9ca3af;">
               📍 ${h.lat.toFixed(4)}°N, ${h.lng.toFixed(4)}°E
             </div>
           </div>
         `);
-      hospitalMarkersRef.current.set(h.name, marker);
+      hospitalMarkersRef.current.set(h.id, marker);
     });
-
-    return () => {
-      if (resumeTimerRef.current) { clearTimeout(resumeTimerRef.current); resumeTimerRef.current = null; }
-      map.remove();
-      mapRef.current = null;
-    };
-  }, []);
+  }, [hospitals, mapReady]);
 
   // Update ambulances and routes
   useEffect(() => {
@@ -280,14 +302,8 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({
           </div>
 
           <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-            ${session.cameraDetected ? 
-              '<div style="background: #d1fae5; color: #065f46; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;">📷 Camera ✓</div>' : 
-              '<div style="background: #fee2e2; color: #991b1b; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;">📷 Camera ✗</div>'
-            }
-            ${session.sirenDetected ? 
-              '<div style="background: #d1fae5; color: #065f46; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;">🔊 Siren ✓</div>' : 
-              '<div style="background: #fee2e2; color: #991b1b; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;">🔊 Siren ✗</div>'
-            }
+            <div style="background: #d1fae5; color: #065f46; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;">● ${session.status === 'active' ? 'EMERGENCY ACTIVE' : session.status.toUpperCase()}</div>
+            <div style="background: #fef3c7; color: #92400e; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;">${session.patient.severity.toUpperCase()}</div>
           </div>
 
           <div style="font-size: 12px; color: #6b7280;">
@@ -301,24 +317,9 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({
         </div>
       `, { maxWidth: 300 });
 
-      // Draw route polyline
+      // Draw route polyline from the backend-provided node coordinates
       const routeCoords: [number, number][] = session.route.map(node => {
-        // Map node names to GPS coordinates (real Bengaluru junctions, matches backend)
-        const coords: Record<string, [number, number]> = {
-          'Indiranagar Metro (Dispatch)': [12.9786, 77.6388],
-          '100 Feet Road Junction': [12.9719, 77.6412],
-          'Domlur Flyover': [12.9604, 77.6417],
-          'Kodihalli Junction': [12.9601, 77.6472],
-          'Marathahalli (ORR)': [12.9562, 77.7019],
-          'Manipal Hospital': [12.9588, 77.6491],
-          'Halasuru (Ulsoor)': [12.9757, 77.6263],
-          'Trinity Circle': [12.9730, 77.6170],
-          'Victoria Hospital': [12.9634, 77.5738],
-          'Adugodi': [12.9435, 77.6091],
-          'Silk Board Junction': [12.9170, 77.6220],
-          "St. John's Medical College Hospital": [12.9293, 77.6201],
-        };
-        return coords[node] || [12.9786, 77.6388];
+        return nodeCoords[node] || FALLBACK_COORD;
       });
 
       // Update or create route polyline
@@ -396,7 +397,7 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({
       }
     });
 
-  }, [sessions, signals, mapReady, centerOnAmbulance, selectedAmbulance]);
+  }, [sessions, signals, nodeCoords, mapReady, centerOnAmbulance, selectedAmbulance]);
 
   return (
     <div style={{ position: 'relative', width: '100%', height }}>

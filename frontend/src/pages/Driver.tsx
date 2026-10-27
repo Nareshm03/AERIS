@@ -1,21 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Power, Navigation, Video, Mic2, CheckCircle2, XCircle, AlertTriangle, Route, RefreshCw, Terminal, Activity, Gauge, MapPin, Clock, Fuel, Thermometer, Building2 } from 'lucide-react';
+import { Power, Navigation, AlertTriangle, Route, RefreshCw, Terminal, Activity, Gauge, MapPin, Clock, Fuel, Thermometer, Building2 } from 'lucide-react';
 import { useSSE } from '../hooks/usePoll';
-import { startEmergency, stopEmergency, fetchRoutes, fetchHospitals, toggleCameraDetection, toggleSirenDetection, detectCameraReal, detectSirenReal } from '../api';
-import type { RealDetectionResult } from '../api';
+import { startEmergency, stopEmergency, fetchRoutes, fetchHospitals } from '../api';
 import type { RouteOption, AmbulanceSession, Hospital } from '../api';
 import { useAuth } from '../context/AuthContext';
 import Nav from '../components/Nav';
 import TrafficLight from '../components/TrafficLight';
 import InteractiveMap from '../components/InteractiveMap';
-import SirenWaveform from '../components/SirenWaveform';
 import { useToast } from '../components/Toast';
-import { LiveBadge, AnimatedProgress, StatusPulse, AnimatedCounter, MetricValue } from '../components/LiveIndicators';
+import { LiveBadge, AnimatedProgress, AnimatedCounter, MetricValue } from '../components/LiveIndicators';
 import { GlassCard } from '../components/EnhancedCard';
 import Tooltip from '../components/Tooltip';
 import { useStaircaseLoading, DashboardSkeleton } from '../components/SkeletonLoader';
 import VitalsMonitor from '../components/VitalsMonitor';
-import CCTVFeedSimulator from '../components/CCTVFeedSimulator';
+import { useGraph } from '../hooks/useGraph';
 
 const intakeInputStyle: React.CSSProperties = {
   padding: '8px 12px',
@@ -31,6 +29,9 @@ const Driver: React.FC = () => {
   const { state, logs, connected, error: sseError, reconnect } = useSSE();
   const { user }   = useAuth();
   const { toast }  = useToast();
+  // Node coordinates come from the backend graph (single source of truth),
+  // used here for live distance-remaining math and passed to the map.
+  const { coords: nodeCoords } = useGraph();
 
   const [loading, setLoading]             = useState(false);
   const [routes, setRoutes]               = useState<RouteOption[]>([]);
@@ -45,14 +46,13 @@ const Driver: React.FC = () => {
   const [patientDepartment, setPatientDepartment] = useState('');
   const [patientNotes, setPatientNotes] = useState('');
   const [showRouteSelector, setShowRouteSelector] = useState(false);
-  const [polling, setPolling]             = useState(false);
 
-  // Real-time metrics state
+  // Real-time metrics state (speed/distance/ETA derived locally from the
+  // backend's simulated positions; fuel/engine come from the session -
+  // backend-owned and SSE-synced, identical on every dashboard).
   const [speed, setSpeed] = useState(0);
   const [distanceRemaining, setDistanceRemaining] = useState(0);
   const [dynamicETA, setDynamicETA] = useState(0);
-  const [fuelLevel, setFuelLevel] = useState(85);
-  const [engineTemp, setEngineTemp] = useState(92);
   const prevGPSRef = useRef<[number, number] | null>(null);
   const prevTimeRef = useRef<number>(Date.now());
 
@@ -103,93 +103,6 @@ const Driver: React.FC = () => {
     s => s.driverId === user?.sub && s.status === 'active'
   );
 
-  const [realDetectLoading, setRealDetectLoading] = useState(false);
-  const [realDetectResult, setRealDetectResult] = useState<RealDetectionResult | null>(null);
-  const [realSirenLoading, setRealSirenLoading] = useState(false);
-  const [realSirenResult, setRealSirenResult] = useState<{ sirenDetected: boolean; confidence: number } | null>(null);
-
-  const handleRealAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file || !mySession) return;
-
-    setRealSirenLoading(true);
-    try {
-      const result = await detectSirenReal(mySession.rid, file);
-      setRealSirenResult(result);
-      toast(
-        result.sirenDetected
-          ? `Real FFT analysis: siren sweep detected (${result.confidence}%)`
-          : `Real FFT analysis: no siren pattern found (${result.confidence}%)`,
-        result.sirenDetected ? 'success' : 'warning'
-      );
-    } catch (error: any) {
-      console.error('Real siren detection error:', error);
-      toast(error.message || 'Detection service unreachable - is it running on :8001?', 'error');
-    } finally {
-      setRealSirenLoading(false);
-    }
-  };
-
-  const handleRealFrameUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = ''; // allow re-selecting the same file again
-    if (!file || !mySession) return;
-
-    setRealDetectLoading(true);
-    try {
-      const result = await detectCameraReal(mySession.rid, file);
-      setRealDetectResult(result);
-      toast(
-        result.detected
-          ? `Real YOLO26 model: Ambulance detected (${result.confidence}%)`
-          : 'Real YOLO26 model: no ambulance found in frame',
-        result.detected ? 'success' : 'warning'
-      );
-    } catch (error: any) {
-      console.error('Real detection error:', error);
-      toast(error.message || 'Detection service unreachable - is it running on :8001?', 'error');
-    } finally {
-      setRealDetectLoading(false);
-    }
-  };
-
-  // Toggle camera detection
-  const toggleCameraDetect = async () => {
-    if (!mySession) return;
-    setPolling(true);
-    try {
-      const data = await toggleCameraDetection(mySession.rid);
-      toast(
-        `Camera: ${data.cameraDetected ? `ENABLED (${data.cameraConfidence}%)` : 'DISABLED'}`,
-        data.cameraDetected ? 'success' : 'warning'
-      );
-    } catch (error: any) {
-      console.error('Camera toggle error:', error);
-      toast(error.message || 'Detection endpoint unreachable', 'error');
-    } finally {
-      setPolling(false);
-    }
-  };
-
-  // Toggle siren detection
-  const toggleSirenDetect = async () => {
-    if (!mySession) return;
-    setPolling(true);
-    try {
-      const data = await toggleSirenDetection(mySession.rid);
-      toast(
-        `Siren: ${data.sirenDetected ? `ENABLED (${data.sirenFrequency} Hz)` : 'DISABLED'}`,
-        data.sirenDetected ? 'success' : 'warning'
-      );
-    } catch (error: any) {
-      console.error('Siren toggle error:', error);
-      toast(error.message || 'Detection endpoint unreachable', 'error');
-    } finally {
-      setPolling(false);
-    }
-  };
-
   const handleToggle = async () => {
     if (!mySession && !selectedHospitalId) {
       toast('Select a destination hospital first', 'error');
@@ -222,8 +135,6 @@ const Driver: React.FC = () => {
   const nodesLeft   = mySession ? mySession.route.length - 1 - mySession.currentNodeIndex : 0;
   const etaMins     = nodesLeft * 2;
   const progress    = mySession ? (mySession.currentNodeIndex / Math.max(1, mySession.route.length - 1)) * 100 : 0;
-  const isVerified  = mySession?.isVerified ?? false;
-  const bothFailed  = isEmergency && mySession && !mySession.cameraDetected && !mySession.sirenDetected;
 
   // Calculate real-time metrics
   useEffect(() => {
@@ -239,7 +150,7 @@ const Driver: React.FC = () => {
       const currentGPS = mySession.currentGPS;
       const currentTime = Date.now();
 
-      // Calculate speed (km/h) from GPS movement
+      // Calculate speed (km/h) from simulated position movement
       if (prevGPSRef.current) {
         const [prevLat, prevLng] = prevGPSRef.current;
         const [currLat, currLng] = currentGPS;
@@ -259,28 +170,13 @@ const Driver: React.FC = () => {
         setSpeed(Math.min(Math.max(calculatedSpeed, 0), 120)); // Cap at 120 km/h
       }
 
-      // Calculate distance remaining
-      const GPS_COORDS: Record<string, [number, number]> = {
-        'Indiranagar Metro (Dispatch)': [12.9786, 77.6388],
-        '100 Feet Road Junction': [12.9719, 77.6412],
-        'Domlur Flyover': [12.9604, 77.6417],
-        'Kodihalli Junction': [12.9601, 77.6472],
-        'Marathahalli (ORR)': [12.9562, 77.7019],
-        'Manipal Hospital': [12.9588, 77.6491],
-        'Halasuru (Ulsoor)': [12.9757, 77.6263],
-        'Trinity Circle': [12.9730, 77.6170],
-        'Victoria Hospital': [12.9634, 77.5738],
-        'Adugodi': [12.9435, 77.6091],
-        'Silk Board Junction': [12.9170, 77.6220],
-        "St. John's Medical College Hospital": [12.9293, 77.6201],
-      };
-
+      // Calculate distance remaining using backend graph coordinates
       let totalDistance = 0;
       for (let i = mySession.currentNodeIndex; i < mySession.route.length - 1; i++) {
         const node1 = mySession.route[i];
         const node2 = mySession.route[i + 1];
-        const [lat1, lng1] = GPS_COORDS[node1] || [0, 0];
-        const [lat2, lng2] = GPS_COORDS[node2] || [0, 0];
+        const [lat1, lng1] = nodeCoords[node1] || [0, 0];
+        const [lat2, lng2] = nodeCoords[node2] || [0, 0];
         
         const R = 6371;
         const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -298,12 +194,6 @@ const Driver: React.FC = () => {
       const etaMinutes = totalDistance > 0 ? (totalDistance / avgSpeed) * 60 : 0;
       setDynamicETA(Math.max(0, etaMinutes));
 
-      // Simulate fuel consumption (decreases during emergency)
-      setFuelLevel(prev => Math.max(15, prev - 0.05));
-
-      // Simulate engine temperature (increases during emergency)
-      setEngineTemp(prev => Math.min(105, prev + (Math.random() * 0.3 - 0.1)));
-
       prevGPSRef.current = currentGPS;
       prevTimeRef.current = currentTime;
     };
@@ -311,7 +201,7 @@ const Driver: React.FC = () => {
     calculateMetrics();
     const interval = setInterval(calculateMetrics, 2000);
     return () => clearInterval(interval);
-  }, [mySession, speed]);
+  }, [mySession, speed, nodeCoords]);
 
   // Speed color indicator
   const getSpeedColor = () => {
@@ -319,6 +209,10 @@ const Driver: React.FC = () => {
     if (speed < 70) return 'var(--orange)';
     return 'var(--red)';
   };
+
+  // Backend-owned telemetry (SSE-synced); standby defaults when idle.
+  const fuelLevel = mySession?.fuelLevel ?? 85;
+  const engineTemp = mySession?.engineTemp ?? 92;
 
   // Fuel color indicator
   const getFuelColor = () => {
@@ -354,8 +248,10 @@ const Driver: React.FC = () => {
     wasEmergencyRef.current = isEmergency;
   }, [isEmergency]);
 
-  const greenCount = state?.signals.filter(s => s.color === 'GREEN').length ?? 0;
-  const signalTotal = state?.signals.length ?? 0;
+  // Route-scoped corridor for MY emergency: signals on my route that are
+  // GREEN right now (backend owns corridor membership via Dijkstra route).
+  const myRouteSigs = mySession ? (state?.signals.filter(s => mySession.route.includes(s.junction)) ?? []) : [];
+  const myRouteGreen = myRouteSigs.filter(s => s.color === 'GREEN').length;
 
   if (!state) return (
     <>
@@ -459,7 +355,8 @@ const Driver: React.FC = () => {
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div className="font-semibold text-sm">{h.name}</div>
-                      <div className="text-xs text-muted">{h.address}</div>
+                      <div className="text-xs text-muted">{h.area}</div>
+                      <div className="text-xs text-quiet mt-1">{h.address}</div>
                       <div className="text-xs text-quiet mt-1">{h.departments.join(' · ')}</div>
                       <div className="text-xs mt-1" style={{
                         color: h.availableBeds === 0 ? 'var(--red-bright)' : h.availableBeds <= h.totalBeds * 0.15 ? 'var(--orange)' : 'var(--green)',
@@ -514,6 +411,7 @@ const Driver: React.FC = () => {
                     <div style={{ flex: 1 }}>
                       <div className="font-semibold text-sm">{r.name}</div>
                       <div className="text-xs text-muted">{r.nodes.join(' → ')}</div>
+                      <div className="text-xs text-quiet mt-1">Dijkstra · {r.nodes.length} nodes · {r.signals} corridor signals</div>
                     </div>
                     <div className="text-right text-xs">
                       <div className="font-semibold text-blue">{r.distance}</div>
@@ -566,15 +464,14 @@ const Driver: React.FC = () => {
             <LiveBadge variant="red" />
             <span className="font-semibold text-sm" style={{ color: 'var(--c-red-bright)' }}>EMERGENCY ACTIVE</span>
             <span className="text-muted text-sm">· RID: <span className="mono">{mySession?.rid}</span> · Green corridor active · ETA: ~{etaMins} min</span>
-            {bothFailed && <span className="status-badge badge-yellow" style={{ marginLeft: 'auto' }}><AlertTriangle size={11} /> Fail-safe: Manual Mode</span>}
           </div>
         )}
 
         {/* ── Interactive Map ── */}
         <GlassCard 
           icon={<Navigation size={20} color="var(--blue)" />}
-          title="Live GPS Tracking Map"
-          subtitle="Real-time ambulance position with traffic signals"
+          title="Live Ambulance Tracking Map"
+          subtitle="Real-time software-simulated position with traffic signals"
           badge={
             isEmergency ? (
               <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
@@ -608,28 +505,17 @@ const Driver: React.FC = () => {
                 <div className="mono" style={{ fontSize: '0.68rem', color: 'var(--text-secondary)' }}>{distanceRemaining.toFixed(1)} km · {mySession.hospital.name}</div>
               </div>
               <div style={{ width: 1, background: 'rgba(0,0,0,0.08)' }} />
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.6px', color: greenCount > 0 ? 'var(--green-dark)' : 'var(--text-tertiary)' }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: greenCount > 0 ? 'var(--green)' : '#c9c2b8' }} />
-                {greenCount > 0 ? `CORRIDOR · ${greenCount} GREEN` : 'CORRIDOR STANDBY'}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.6px', color: myRouteGreen > 0 ? 'var(--green-dark)' : 'var(--text-tertiary)' }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: myRouteGreen > 0 ? 'var(--green)' : '#c9c2b8' }} />
+                  {myRouteGreen > 0 ? `CORRIDOR · GREEN ${myRouteGreen}/${myRouteSigs.length}` : 'CORRIDOR STANDBY'}
               </div>
             </div>
           )}
           <InteractiveMap
             sessions={state?.sessions || []}
-            signals={state?.signals.map(s => {
-              // Map signal junctions to GPS coordinates
-              const junctionCoords: Record<string, [number, number]> = {
-                '100 Feet Road Junction': [12.9719, 77.6412],
-                'Domlur Flyover': [12.9604, 77.6417],
-                'Kodihalli Junction': [12.9601, 77.6472],
-                'Marathahalli (ORR)': [12.9562, 77.7019],
-                'Halasuru (Ulsoor)': [12.9757, 77.6263],
-                'Trinity Circle': [12.9730, 77.6170],
-                'Adugodi': [12.9435, 77.6091],
-              };
-              const [lat, lng] = junctionCoords[s.junction] || [12.9786, 77.6388];
-              return { id: s.id, name: s.name, color: s.color, lat, lng };
-            }) || []} 
+            signals={state?.signals || []}
+            hospitals={state?.hospitals || []}
+            nodeCoords={nodeCoords}
             centerOnAmbulance={isEmergency}
             showTraffic={true}
             showLegend={true}
@@ -640,7 +526,7 @@ const Driver: React.FC = () => {
 
         <div className="grid-2 stagger">
 
-          {/* ── Left: Detection ── */}
+          {/* ── Left: Emergency status + vitals ── */}
           <div className="flex flex-col gap-4">
 
             {/* Real-Time Metrics Dashboard */}
@@ -652,24 +538,26 @@ const Driver: React.FC = () => {
               glowColor="rgba(93,125,166,0.15)"
             >
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem' }}>
-                {/* Status — emergency state first */}
+                {/* Emergency status — software source of truth.
+                    Activation is initiated by the authenticated ambulance
+                    operator; authorization comes from JWT + RBAC. */}
                 <div style={{
                   padding: '1.25rem',
                   borderRadius: 12,
                   background: isEmergency ? 'rgba(255,59,92,0.06)' : 'rgba(255,255,255,0.02)',
-                  border: `2px solid ${isEmergency ? 'rgba(255,59,92,0.35)' : isVerified ? 'rgba(52,199,89,0.2)' : 'rgba(0,0,0,0.08)'}`
+                  border: `2px solid ${isEmergency ? 'rgba(255,59,92,0.35)' : 'rgba(0,0,0,0.08)'}`
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                    {isEmergency
-                      ? (isVerified ? <CheckCircle2 size={18} color="var(--c-red-bright)" /> : <XCircle size={18} color="var(--c-red-bright)" />)
-                      : <CheckCircle2 size={18} color="var(--text-tertiary)" />}
-                    <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>STATUS</span>
+                    <span style={{ width: 10, height: 10, borderRadius: '50%', background: isEmergency ? 'var(--c-red-bright)' : '#c9c2b8' }} />
+                    <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>EMERGENCY STATUS</span>
                   </div>
                   <div style={{ fontSize: '1.5rem', fontWeight: 700, color: isEmergency ? 'var(--c-red-bright)' : 'var(--text-tertiary)', marginBottom: 4 }}>
-                    {isEmergency ? (isVerified ? 'ACTIVE · VERIFIED' : 'ACTIVE · MANUAL') : 'READY'}
+                    {isEmergency ? 'EMERGENCY ACTIVE' : 'SYSTEM READY'}
                   </div>
                   <div className="text-xs" style={{ color: 'var(--text-muted)', marginTop: 4 }}>
-                    {isEmergency ? (isVerified ? 'Sensors active' : 'Override mode') : 'No emergency'}
+                    {isEmergency
+                      ? `${mySession?.rid} → ${mySession?.hospital.name}`
+                      : 'No emergency — operator-initiated activation only'}
                   </div>
                 </div>
 
@@ -828,151 +716,54 @@ const Driver: React.FC = () => {
               </div>
             )}
 
-            {/* Dual Detection Panel */}
+            {/* Emergency Status — software source of truth.
+                Emergency activation is initiated by the authenticated
+                ambulance operator. No camera/siren/hardware step exists. */}
             <div className="card">
               <div className="card-header">
                 <div className="card-title">
-                  <div className="card-title-icon"><Video size={16} /></div>
-                  Emergency Verification
+                  <div className="card-title-icon"><Activity size={16} /></div>
+                  Emergency Status
                 </div>
-                <Tooltip label="Simulate a new camera detection reading">
-                  <button onClick={toggleCameraDetect} disabled={!mySession || polling} className="btn btn-ghost btn-sm">
-                    <RefreshCw size={12} className={polling ? 'spin' : ''} /> Toggle
-                  </button>
-                </Tooltip>
+                {isEmergency && <LiveBadge variant="red" />}
               </div>
 
               <div className="card-body">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: '0.72rem', fontWeight: 800, letterSpacing: '1px', color: !mySession ? 'var(--text-tertiary)' : isVerified ? 'var(--green-dark)' : 'var(--orange)' }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: !mySession ? '#c9c2b8' : isVerified ? 'var(--green)' : 'var(--orange)' }} />
-                  {!mySession ? 'STANDBY — AWAITING EMERGENCY ACTIVATION' : isVerified ? 'EMERGENCY VERIFIED' : 'VERIFYING…'}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: '0.72rem', fontWeight: 800, letterSpacing: '1px', color: !mySession ? 'var(--text-tertiary)' : 'var(--c-red-bright)' }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: !mySession ? '#c9c2b8' : 'var(--c-red-bright)' }} />
+                  {!mySession ? '● SYSTEM READY' : '● EMERGENCY ACTIVE'}
                 </div>
 
-              {/* Camera */}
-              <div className="detection-row">
-                <div style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '1.5px', color: 'var(--text-tertiary)', marginBottom: 6 }}>CAMERA — YOLO OBJECT DETECTION</div>
-                <div className="detection-label">
-                  <div className="flex items-center gap-2">
-                    <Video size={14} color={mySession?.cameraDetected ? 'var(--c-green)' : 'var(--c-red)'} />
-                    <span className="text-sm">Camera · YOLO Object Detection</span>
-                    {mySession?.cameraDetected && <LiveBadge variant="green" />}
+                {!mySession ? (
+                  <div className="text-sm text-muted">
+                    No active emergency. Select a destination hospital above and
+                    press <strong>ACTIVATE EMERGENCY</strong> to start a software
+                    emergency session — routing, green corridor, hospital and
+                    police coordination begin immediately.
                   </div>
-                  <StatusPulse 
-                    status={mySession?.cameraDetected ? 'active' : 'error'} 
-                    label={mySession?.cameraDetected ? 'DETECTED' : 'NO SIGNAL'}
-                    size="sm"
-                  />
-                </div>
-                <AnimatedProgress 
-                  value={mySession?.cameraConfidence ?? 0} 
-                  height={10} 
-                  color={mySession?.cameraDetected ? 'var(--green)' : 'var(--red)'}
-                />
-                <div className="text-xs text-muted mt-1">
-                  Confidence: <MetricValue value={mySession?.cameraConfidence ?? 0} suffix="%" color="var(--text-primary)" /> · Threshold: ≥75%
-                </div>
-
-                {/* Real YOLO26 model inference - upload/capture an actual frame
-                    instead of the simulated toggle above. Runs through your
-                    trained best.onnx via the detection microservice. */}
-                <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <label className="btn btn-ghost btn-sm" style={{ cursor: mySession ? 'pointer' : 'not-allowed', opacity: mySession ? 1 : 0.5 }}>
-                    <Video size={12} /> {realDetectLoading ? 'Analyzing…' : 'Test Real Detection (upload frame)'}
-                    <input
-                      type="file"
-                      accept="image/*"
-                      style={{ display: 'none' }}
-                      disabled={!mySession || realDetectLoading}
-                      onChange={handleRealFrameUpload}
-                    />
-                  </label>
-                  {realDetectResult && (
-                    <span className="text-xs" style={{ color: realDetectResult.detected ? 'var(--green)' : 'var(--red)' }}>
-                      {realDetectResult.detected ? `Real model: Ambulance ${realDetectResult.confidence}%` : 'Real model: no ambulance found'}
-                      {realDetectResult.sirenDetected ? ` · Siren light ${realDetectResult.sirenConfidence}%` : ''}
-                    </span>
-                  )}
-                </div>
-
-                {/* CCTV feed simulation - a video stands in for a live
-                    roadside camera, frames are periodically grabbed and
-                    run through the real model, exactly like a real
-                    camera integration would work. */}
-                {mySession && (
-                  <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(0,0,0,0.06)' }}>
-                    <div className="text-xs font-semibold text-muted mb-2" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Video size={12} /> Simulated CCTV Feed
-                    </div>
-                    <CCTVFeedSimulator
-                      rid={mySession.rid}
-                      onDetection={(result) => {
-                        setRealDetectResult(result);
-                      }}
-                    />
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px', fontSize: '0.8rem' }}>
+                    {[
+                      ['Unit', mySession.rid],
+                      ['Destination', mySession.hospital.name],
+                      ['ETA', `~${etaMins} min`],
+                      ['Distance', `${distanceRemaining.toFixed(1)} km`],
+                      ['Route', mySession.routeName.split(' (')[0]],
+                      ['Corridor', `GREEN ${myRouteGreen} / ${myRouteSigs.length}`],
+                      ['Progress', `${mySession.currentNodeIndex + 1} of ${mySession.route.length} nodes`],
+                      ['Severity', mySession.patient.severity.toUpperCase()],
+                    ].map(([k, v]) => (
+                      <div key={k} style={{ padding: '6px 0', borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
+                        <div className="text-xs text-quiet mb-1">{k}</div>
+                        <div className="font-semibold" style={{ fontSize: '0.82rem' }}>{v}</div>
+                      </div>
+                    ))}
                   </div>
                 )}
-              </div>
-
-              {/* Siren */}
-              <div className="detection-row" style={{ marginTop: 12 }}>
-                <div style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '1.5px', color: 'var(--text-tertiary)', marginBottom: 6 }}>SIREN — AUDIO FFT</div>
-                <div className="detection-label">
-                  <div className="flex items-center gap-2">
-                    <Mic2 size={14} color={mySession?.sirenDetected ? 'var(--c-green)' : 'var(--c-red)'} />
-                    <span className="text-sm">Siren Sensor · Audio FFT</span>
-                    {mySession?.sirenDetected && <LiveBadge variant="green" />}
-                  </div>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <StatusPulse 
-                      status={mySession?.sirenDetected ? 'active' : 'idle'} 
-                      label={mySession?.sirenDetected ? `${mySession.sirenFrequency} Hz` : 'SILENT'}
-                      size="sm"
-                    />
-                    <Tooltip label="Simulate a new siren frequency reading">
-                      <button onClick={toggleSirenDetect} disabled={!mySession || polling} className="btn btn-ghost btn-sm" style={{ fontSize: '0.68rem', padding: '2px 8px' }}>Toggle</button>
-                    </Tooltip>
-                  </div>
-                </div>
-                <SirenWaveform active={mySession?.sirenDetected ?? false} frequency={mySession?.sirenFrequency ?? 0} />
-                <div className="text-xs text-muted mt-1">
-                  Frequency: <MetricValue value={mySession?.sirenFrequency ?? 0} suffix=" Hz" color="var(--text-primary)" /> · Threshold: ≥700 Hz
-                </div>
-
-                {/* Real FFT-based audio analysis - upload an actual WAV clip
-                    instead of the simulated toggle above. Runs genuine signal
-                    processing (spectral energy + sweep periodicity) via the
-                    detection microservice. */}
-                <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <label className="btn btn-ghost btn-sm" style={{ cursor: mySession ? 'pointer' : 'not-allowed', opacity: mySession ? 1 : 0.5 }}>
-                    <Mic2 size={12} /> {realSirenLoading ? 'Analyzing…' : 'Test Real Detection (upload WAV)'}
-                    <input
-                      type="file"
-                      accept="audio/wav,.wav"
-                      style={{ display: 'none' }}
-                      disabled={!mySession || realSirenLoading}
-                      onChange={handleRealAudioUpload}
-                    />
-                  </label>
-                  {realSirenResult && (
-                    <span className="text-xs" style={{ color: realSirenResult.sirenDetected ? 'var(--green)' : 'var(--red)' }}>
-                      Real FFT: {realSirenResult.sirenDetected ? `Siren detected (${realSirenResult.confidence}%)` : `No siren pattern (${realSirenResult.confidence}%)`}
-                    </span>
-                  )}
+                <div className="text-xs text-quiet mt-3">
+                  Authorized operator session{user?.name ? ` — ${user.name}` : ''}. Hospital and police dashboards receive live SSE updates.
                 </div>
               </div>
-
-              {/* Overall verification */}
-              <div style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '1.5px', color: 'var(--text-tertiary)', marginTop: 12, marginBottom: 6 }}>OVERALL VERIFICATION</div>
-              <div className={`mt-3 p-3 rounded flex items-center gap-3`} style={{
-                background: isVerified ? 'var(--green-light)' : 'var(--red-light)',
-                border: `1px solid ${isVerified ? 'rgba(52,199,89,0.25)' : 'rgba(255,59,48,0.2)'}`,
-              }}>
-                {isVerified
-                  ? <><CheckCircle2 size={18} color="var(--green)" /><div><div className="text-sm font-semibold text-green">Verified — Corridor authorised</div><div className="text-xs text-muted">{mySession?.cameraDetected && mySession?.sirenDetected ? 'Camera ✓ + Siren ✓' : mySession?.cameraDetected ? 'Camera ✓ (Siren fallback)' : 'Siren ✓ (Camera fallback)'}</div></div></>
-                  : <><XCircle size={18} color="var(--red)" /><div><div className="text-sm font-semibold text-red">{isEmergency ? 'Both sensors failed — fail-safe active (manual)' : 'Awaiting emergency activation'}</div></div></>
-                }
-              </div>
-            </div>
             </div>
 
           </div>
@@ -990,8 +781,8 @@ const Driver: React.FC = () => {
               </div>
               <div className="card-body">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.8px', color: isEmergency ? 'var(--green-dark)' : 'var(--text-tertiary)' }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: isEmergency ? (greenCount > 0 ? 'var(--green)' : 'var(--orange)') : '#c9c2b8' }} />
-                  {isEmergency ? `GREEN CORRIDOR ACTIVE · ${greenCount}/${signalTotal} SIGNALS GREEN` : 'STANDBY — CORRIDOR ARMS ON ACTIVATION'}
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: isEmergency ? (myRouteGreen > 0 ? 'var(--green)' : 'var(--orange)') : '#c9c2b8' }} />
+                  {isEmergency ? `GREEN CORRIDOR ACTIVE · ${myRouteGreen}/${myRouteSigs.length} ROUTE SIGNALS GREEN` : 'STANDBY — CORRIDOR ARMS ON ACTIVATION'}
                 </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(95px, 1fr))', gap: 10 }}>
                 {state?.signals.map(sig => {
